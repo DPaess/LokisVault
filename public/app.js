@@ -492,6 +492,96 @@ ACTIONS['wish-built'] = (el) => {
   render();
 };
 
+// ---- Mastery -------------------------------------------------------------------
+
+function masteryShown() {
+  const f = (ui.mastery ??= { q: '', category: '', prime: '', status: 'todo' });
+  const q = norm(f.q);
+  return masteryItems().filter(
+    (m) =>
+      (!q || norm(m.name).includes(q)) &&
+      (!f.category || m.category === f.category) &&
+      (!f.prime || (f.prime === 'prime') === m.prime) &&
+      (!f.status || (f.status === 'done') === Boolean(state.mastered[m.id])),
+  );
+}
+
+VIEWS.mastery = () => {
+  const items = masteryItems();
+  const done = items.filter((m) => state.mastered[m.id]);
+  const shown = masteryShown();
+  const f = ui.mastery;
+  const categories = [...new Set(items.map((m) => m.category))].sort();
+  const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
+  const rows = shown.map((m) => {
+    const isDone = Boolean(state.mastered[m.id]);
+    const wishable = m.prime && !isDone && DATA.sets[m.name] && !state.wishlist.includes(m.name);
+    return `<tr class="${isDone ? 'dim' : ''}">
+      <td><input type="checkbox" ${isDone ? 'checked' : ''} data-change="mastery-toggle" data-id="${esc(m.id)}" aria-label="Mastered"></td>
+      <td>${esc(m.name)} ${m.prime && m.vaulted ? '<span class="badge vault">Vaulted</span>' : ''} ${state.wishlist.includes(m.name) ? '<span class="badge void">Wishlist</span>' : ''}</td>
+      <td class="muted">${esc(m.category)}</td>
+      <td class="muted hide-sm">${esc(m.type)}</td>
+      <td class="num">${fmtNum(m.xp)}</td>
+      <td class="num">${m.mr || ''}</td>
+      <td>${wishable ? `<button class="small" data-action="wish-add" data-set="${esc(m.name)}">+ Wishlist</button>` : ''}</td>
+    </tr>`;
+  });
+  return `
+    ${head('Mastery', 'Every masterable item we know of. Tick what you have mastered. For a fast first fill, filter down to a category and use “Mark all shown”.')}
+    <div class="panel" style="margin-bottom:14px">
+      <div class="row"><b>${fmtNum(masteryXp(done))}</b> <span class="muted">of ${fmtNum(masteryXp(items))} mastery points ·</span>
+        <b>${done.length}</b> <span class="muted">of ${items.length} items</span></div>
+      ${bar(masteryXp(done), masteryXp(items))}
+    </div>
+    <div class="toolbar">
+      <input class="grow" type="search" placeholder="Search" value="${esc(f.q)}" data-input="mastery-q" data-focus="mastery-q">
+      <select data-change="mastery-filter" data-key="category" aria-label="Category">${opt('', 'All categories', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select>
+      <select data-change="mastery-filter" data-key="prime" aria-label="Prime">${opt('', 'Prime and non prime', f.prime)}${opt('prime', 'Prime only', f.prime)}${opt('normal', 'Non prime only', f.prime)}</select>
+      <select data-change="mastery-filter" data-key="status" aria-label="Status">${opt('todo', 'Not mastered', f.status)}${opt('done', 'Mastered', f.status)}${opt('', 'Any status', f.status)}</select>
+    </div>
+    <div class="toolbar">
+      <span class="muted small">${shown.length} shown, ${fmtNum(masteryXp(shown.filter((m) => !state.mastered[m.id])))} points still to earn among them</span>
+      <span class="spacer"></span>
+      <button class="small" data-action="mastery-bulk" data-value="1" ${shown.length ? '' : 'disabled'}>Mark all shown as mastered</button>
+      <button class="small danger" data-action="mastery-bulk" data-value="0" ${shown.length ? '' : 'disabled'}>Unmark all shown</button>
+    </div>
+    ${
+      shown.length
+        ? `<div class="table-wrap"><table>
+             <thead><tr><th></th><th>Name</th><th>Category</th><th class="hide-sm">Type</th><th class="num">XP</th><th class="num">MR</th><th></th></tr></thead>
+             <tbody>${rows.join('')}</tbody>
+           </table></div>`
+        : '<div class="empty">Nothing matches these filters.</div>'
+    }
+    <p class="small muted">Not tracked yet: Amps, some MOA and Hound parts, Plexus, intrinsics and the star chart.</p>`;
+};
+
+INPUTS['mastery-q'] = (el) => {
+  ui.mastery.q = el.value;
+  render();
+};
+CHANGES['mastery-filter'] = (el) => {
+  ui.mastery[el.dataset.key] = el.value;
+  render();
+};
+CHANGES['mastery-toggle'] = (el) => {
+  if (el.checked) state.mastered[el.dataset.id] = true;
+  else delete state.mastered[el.dataset.id];
+  save();
+  render();
+};
+ACTIONS['mastery-bulk'] = (el) => {
+  const shown = masteryShown();
+  const on = el.dataset.value === '1';
+  if (!confirm(`${on ? 'Mark' : 'Unmark'} all ${shown.length} shown items as ${on ? '' : 'not '}mastered?`)) return;
+  for (const m of shown) {
+    if (on) state.mastered[m.id] = true;
+    else delete state.mastered[m.id];
+  }
+  save(`${shown.length} items ${on ? 'marked' : 'unmarked'}`);
+  render();
+};
+
 const todo = (title) => () => `${head(title)}<div class="empty">Coming soon.</div>`;
 for (const [tab, title] of Object.entries({ relics: 'Relics', parts: 'Prime parts', wishlist: 'Wishlist', mastery: 'Mastery', trade: 'Sell or ducat', data: 'Data' })) {
   VIEWS[tab] ??= todo(title);
@@ -511,7 +601,11 @@ function render() {
   const key = view.contains(active) ? active.dataset.focus : null;
   const sel = key && 'selectionStart' in active ? [active.selectionStart, active.selectionEnd] : null;
 
-  for (const a of document.querySelectorAll('#tabs a')) a.classList.toggle('active', a.getAttribute('href') === `#${tab}`);
+  for (const a of document.querySelectorAll('#tabs a')) {
+    const on = a.getAttribute('href') === `#${tab}`;
+    a.classList.toggle('active', on);
+    if (on) a.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
   view.innerHTML = VIEWS[tab]();
 
   if (key) {
