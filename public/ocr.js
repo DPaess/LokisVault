@@ -162,15 +162,22 @@ const median = (xs) => {
 // such as "@2". A bare number is not trusted as a count: it is more often a relic code ("Neo 02")
 // or a stray read off an item icon.
 const countOf = (w) => {
-  const m = w.text.match(/^(?:[x×]|[@©®✓√]+)(\d{1,3})$/i);
-  return m ? Number(m[1]) : null;
+  const m = w.text.trim().match(/^(?:[x×]|[@©®✓√]+)?\s*(\d{1,3})$/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (n < 1) return null;
+  // Engines that read whole lines keep codes like "Neo 02" together, so a lone number is a count,
+  // but icons (the era filter's ∞, the eye on unowned relics) also come back as faint digits.
+  // Word by word engines split relic codes, so there a bare number is never trusted.
+  if (/^\d+$/.test(w.text.trim())) return w.line && (w.conf ?? 0) >= 80 ? n : null;
+  return n;
 };
 
 // The relic screen lists the selected relic's possible rewards on the right, under a
 // "<relic> - Possible Rewards" title. Those are not owned items, so drop everything from that
 // title's left edge rightwards.
 export function dropRewardPanel(words) {
-  const title = words.find((w) => /^(possible|rewards?)$/i.test(w.text));
+  const title = words.find((w) => /\b(possible|rewards?)\b/i.test(w.text) && !/^select\b/i.test(w.text));
   if (!title) return words;
   const h = title.y1 - title.y0;
   const sameLine = words
@@ -236,6 +243,7 @@ export function groupTiles(words, read = () => true) {
     const ordered = lines.flatMap((l) => l.words.sort((a, b) => a.x0 - b.x0));
     return {
       text: ordered.map((w) => w.text).join(' '),
+      conf: Math.min(...ws.map((w) => w.conf ?? 100)),
       qty: null,
       x0: Math.min(...ws.map((w) => w.x0)),
       x1: Math.max(...ws.map((w) => w.x1)),
@@ -293,7 +301,7 @@ export function combinePasses(passes, read) {
       // Same spot when the boxes overlap enough: icon junk can stretch one pass's box upwards.
       let spot = spots.find((s) => overlap(s, tile) > 0.3);
       if (!spot) spots.push((spot = { x0: tile.x0, y0: tile.y0, x1: tile.x1, y1: tile.y1, reads: [] }));
-      spot.reads.push({ ...tile.hit, qty: tile.qty, read: tile.text, box: { x0: tile.x0, y0: tile.y0, x1: tile.x1, y1: tile.y1 } });
+      spot.reads.push({ ...tile.hit, qty: tile.qty, read: tile.text, conf: tile.conf, box: { x0: tile.x0, y0: tile.y0, x1: tile.x1, y1: tile.y1 } });
     }
   });
   const items = new Map();
@@ -309,7 +317,8 @@ export function combinePasses(passes, read) {
     // The tightest box is the cleanest read of the name, without junk picked up from the icon art.
     const box = mine.reduce((a, r) => (area(r.box) < area(a) ? r.box : a), mine[0].box);
     // Unsure when the passes disagreed on this spot or only one pass could read it.
-    const sure = mine.length >= 2 && mine.length === reads.length;
+    // With a single pass, the engine's own confidence decides instead.
+    const sure = passes.length > 1 ? mine.length >= 2 && mine.length === reads.length : mine[0].conf >= 90;
     const item = { ...mine[0], qty: tally(mine.map((r) => r.qty)) ?? 1, box, votes: mine.length, sure };
     // One tile per item on a screen: if a name shows up at two spots, trust the better supported one.
     const prev = items.get(key);

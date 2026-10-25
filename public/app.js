@@ -1077,10 +1077,14 @@ function readRelicCode(words) {
 }
 
 function readTile(tile) {
-  const all = norm(tile.text).split(' ');
+  // Some reads drop spaces ("AxiA11 Relic", "Neo N12Relic"): put them back around era and "Relic".
+  const spaced = norm(tile.text)
+    .replace(/\b(lith|meso|neo|axi|requiem)(?=[a-z0-9])/g, '$1 ')
+    .replace(/(?<=[a-z0-9])relic\b/g, ' relic');
+  const all = spaced.split(' ');
   if (all.includes('rank')) return all.includes('max') ? readMasteryTile(all) : null;
   let ref = 'intact';
-  const words = norm(tile.text)
+  const words = spaced
     .split(' ')
     .filter((w) => {
       const r = w.length >= 5 && fuzzyRef(w, 0.25);
