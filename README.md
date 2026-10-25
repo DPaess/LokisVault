@@ -6,17 +6,39 @@ A Warframe planner for players who cannot run overlays. Track the relics and pri
 
 ## Why
 
-I play Warframe through GeForce Now. The game runs in the cloud, so tools like AlecaFrame, WFInfo or WFIT cannot see my inventory. Loki's Vault is the low-tech answer: you type in what you own (or paste a list), and the site does the planning with public game data and market prices.
+I play Warframe through GeForce Now. The game runs in the cloud, so tools like AlecaFrame, WFInfo or WFIT cannot see my inventory. Loki's Vault is the low-tech answer: you type in what you own, paste a list or drop in screenshots, and the site does the planning with public game data and market prices.
 
 ## Features
 
-* **Overview**: mastery progress, wishlist completion, relic count, the value of your spare parts in plat and ducats, and next steps (which relics to crack, which needed parts you have no relic for).
-* **Relics**: your relics by refinement (intact, exceptional, flawless, radiant), their rewards with drop chance, price and ducats, parts you still need highlighted, and the expected value of one opening. Relics are tagged as dropping now or vaulted.
+* **Overview**: mastery progress, wishlist completion, relic count, the value of your spare parts in plat and ducats, and next steps: which relics to crack (click one to see its drops with your wishlist parts highlighted) and which needed parts you have no relic for (click one to see where to farm or buy it).
+* **Relics**: your relics by refinement (intact, exceptional, flawless, radiant), their rewards with drop chance, price and ducats, parts you still need highlighted, and the expected value of one opening. Relics are tagged as dropping now or vaulted, and can be filtered by type (Lith, Meso, Neo, Axi, Requiem).
 * **Prime parts**: the parts you own, how many your wishlist needs, and which sets you can build right now.
-* **Wishlist**: prime sets you want. Each missing part shows which of your relics drop it, which relics you can farm today, or a warframe.market link when every source is vaulted. Mark a set as built to use up its parts and mark it mastered.
+* **Wishlist**: prime sets you want. Each missing part shows which of your relics drop it, which relics you can farm today, or a warframe.market link when every source is vaulted. Mark a set as built to use up its parts and mark it mastered. Search, filter (category, ready or missing parts, vaulted, missing parts in my relics) and sort (closest to done, fewest missing, set price).
 * **Mastery**: every masterable item with mastered or not, remaining mastery points, filters and bulk marking for a quick first fill.
 * **Sell or ducat**: every spare part with its market price, ducat value and a verdict based on a ducats per plat threshold you choose, plus spare sets worth more sold whole.
-* **Data**: add items from inventory screenshots (text recognition runs in your browser, you review every match before it is added), JSON backup and restore, optional sync between devices through a secret Gist on your own GitHub account, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
+* **Data**: add relics, prime parts and mastered items from screenshots (see below), JSON backup and restore, optional sync between devices through a secret Gist on your own GitHub account, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
+
+## Adding items from screenshots
+
+Typing hundreds of items is slow, so the Data tab can read them from screenshots you take in game. With GeForce Now, the overlay screenshot or your system's screenshot key both work. Choose, drop or paste one or many screenshots, check the list it finds, then click **Add checked to vault**. Text recognition runs in your browser with Tesseract.js and your images are never uploaded.
+
+Three screens work today:
+
+**Inventory → Prime Parts.** Names and the ✓ count in each tile's corner are read. A tile without a number counts as one.
+
+![Prime Parts inventory screen](docs/screenshots/prime-parts.jpg)
+
+**Void Relics.** The relic name, the `x22` style count and the refinement (`[Radiant]`) are read. The "Possible Rewards" panel on the right is ignored, those are not items you own. Take one screenshot per era tab.
+
+![Void Relics screen](docs/screenshots/void-relics.jpg)
+
+**Profile → Equipment.** Every tile showing **MAX RANK** is marked as mastered. Tiles still levelling (`RANK 28`) and greyed out items are skipped, and nothing is ever unmarked.
+
+![Profile Equipment screen used for mastery](docs/screenshots/equipment-mastery.jpg)
+
+Tips: scroll and keep taking screenshots, overlap is fine because an item seen twice counts once. Each screenshot is read in four passes, so allow a few seconds per image. Always glance over the review table, recognition is good but not perfect.
+
+<sub>Screenshots of Warframe © Digital Extremes Ltd., cropped to the item grid and used non-commercially under the [Warframe Content Policy](https://www.warframe.com/contentpolicy).</sub>
 
 ## Privacy
 

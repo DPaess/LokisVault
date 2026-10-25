@@ -9,7 +9,7 @@ Read this whole file before doing anything. It is the spec and the status of the
 * Work in small steps and commit after each one (Conventional Commits, e.g. `feat(relics): ...`). Claude co-author trailers are fine.
 * When writing prose to Danilo, never use dashes or hyphens as punctuation and never use semicolons. Prefer flowing prose over short fragmented sentences.
 * **Digital Extremes terms come first.** Before building any feature, check it against DE's EULA and Terms of Use and tell Danilo the verdict before writing code. Never build anything that reads game memory, sniffs or alters network traffic, injects into or automates the game client, uses his account credentials or tokens against DE's servers, automates trading, or redistributes DE art and icons, even if asked. Explain why and offer a compliant alternative instead.
-* Public repo, MIT license. Fan project, no Digital Extremes logos or official art. Keep the footer disclaimer.
+* Public repo, MIT license. Fan project, no Digital Extremes logos or official art. Keep the footer disclaimer. The one exception is the cropped how-to screenshots in `docs/screenshots/` used by the README (Danilo approved them on 2026-10-25, allowed by DE's Content Policy for non-commercial use). They never go into `public/`, and must be cropped so no nick, currency or overlay shows.
 
 ## What this is and why
 
