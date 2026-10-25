@@ -666,10 +666,159 @@ CHANGES.ratio = (el) => {
   render();
 };
 
-const todo = (title) => () => `${head(title)}<div class="empty">Coming soon.</div>`;
-for (const [tab, title] of Object.entries({ relics: 'Relics', parts: 'Prime parts', wishlist: 'Wishlist', mastery: 'Mastery', trade: 'Sell or ducat', data: 'Data' })) {
-  VIEWS[tab] ??= todo(title);
+// ---- Data: backup, import and bulk paste ---------------------------------------
+
+// Reads "3x Neo H4", "Neo H4 Relic (Radiant) x3", "Ash Prime Systems x2" and so on.
+// Returns candidate readings, most likely first: with a quantity split off, then the whole line as a name
+// (so a relic like "Lith X1" is not mistaken for "Lith" times 1).
+function quantityReadings(line) {
+  const s = line.replace(/[()[\],]/g, ' ').replace(/\s+/g, ' ').trim();
+  const out = [];
+  let m;
+  if ((m = s.match(/^(\d+)\s*x?\s+(.+)$/i))) out.push({ qty: Number(m[1]), rest: m[2] });
+  else if ((m = s.match(/^(.+?)\s+(?:x\s*(\d+)|(\d+)\s*x)$/i))) out.push({ qty: Number(m[2] || m[3]), rest: m[1] });
+  out.push({ qty: 1, rest: s });
+  return out;
 }
+
+function matchInventoryLine(line) {
+  for (const { qty, rest } of quantityReadings(line)) {
+    if (qty < 1) continue;
+    const refMatch = norm(rest).match(new RegExp(`\\b(${REFS.join('|')})\\b`));
+    const ref = refMatch?.[1] ?? 'intact';
+    const relic = resolveRelic(norm(rest).replace(refMatch?.[0] ?? '\u0000', ''));
+    if (relic) return { kind: 'relic', name: relic, ref, qty };
+    const part = resolvePart(rest);
+    if (part) return { kind: 'part', name: part, qty };
+  }
+  return null;
+}
+
+function matchMasteryLine(line) {
+  const t = norm(line);
+  if (!t) return [];
+  const exact = masteryItems().filter((m) => norm(m.name) === t);
+  if (exact.length) return exact;
+  const names = [...new Set(masteryItems().filter((m) => norm(m.name).startsWith(t)).map((m) => m.name))];
+  return names.length === 1 ? masteryItems().filter((m) => m.name === names[0]) : [];
+}
+
+function bulkApply(text, mode) {
+  const matched = [];
+  const unmatched = [];
+  for (const line of text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+    if (mode === 'mastery') {
+      const hits = matchMasteryLine(line);
+      if (!hits.length) unmatched.push(line);
+      else {
+        for (const m of hits) state.mastered[m.id] = true;
+        matched.push(`${line} → ${hits[0].name} mastered`);
+      }
+      continue;
+    }
+    const hit = matchInventoryLine(line);
+    if (!hit) unmatched.push(line);
+    else if (hit.kind === 'relic') {
+      const r = (state.relics[hit.name] ??= {});
+      r[hit.ref] = (r[hit.ref] ?? 0) + hit.qty;
+      matched.push(`${line} → ${hit.qty}× ${hit.name} ${REF_LABEL[hit.ref]}`);
+    } else {
+      state.parts[hit.name] = owned(hit.name) + hit.qty;
+      matched.push(`${line} → ${hit.qty}× ${hit.name}`);
+    }
+  }
+  return { matched, unmatched };
+}
+
+VIEWS.data = () => {
+  const b = (ui.bulk ??= { mode: 'inventory', text: '', report: null });
+  const r = b.report;
+  return `
+    ${head('Data', 'Your inventory lives only in this browser. Export a backup now and then, especially before clearing site data or switching devices.')}
+    <div class="panel">
+      <h3>Bulk paste</h3>
+      <p class="small muted">One item per line. Counts are added to what you already have.</p>
+      <form data-form="bulk">
+        <div class="toolbar">
+          <select name="mode" data-change="bulk-mode" aria-label="What you are pasting">
+            <option value="inventory"${b.mode === 'inventory' ? ' selected' : ''}>Relics and prime parts</option>
+            <option value="mastery"${b.mode === 'mastery' ? ' selected' : ''}>Mastered items</option>
+          </select>
+          <span class="spacer"></span>
+          <button class="primary">Add to vault</button>
+        </div>
+        <textarea name="text" data-focus="bulk-text" spellcheck="false" placeholder="${
+          b.mode === 'mastery'
+            ? 'Loki Prime\nSoma Prime\nNikana'
+            : '3x Lith G1\nNeo H4 Relic (Radiant) x2\n2 Axi S2 Exceptional\nLoki Prime Chassis\nAsh Prime Systems x2'
+        }">${esc(b.text)}</textarea>
+      </form>
+      ${
+        r
+          ? `<div style="margin-top:12px">
+               <p class="small"><span class="ok">${r.matched.length} matched</span>${r.unmatched.length ? `, <span class="miss">${r.unmatched.length} not recognised</span>` : ''}</p>
+               ${r.unmatched.length ? `<div class="note small"><b>Not recognised</b>, fix and paste these again:<br>${r.unmatched.map(esc).join('<br>')}</div>` : ''}
+               ${r.matched.length ? `<details><summary class="small muted">Show matched lines</summary><div class="small muted">${r.matched.map(esc).join('<br>')}</div></details>` : ''}
+             </div>`
+          : ''
+      }
+    </div>
+    <div class="panel">
+      <h3>Backup</h3>
+      <div class="row" style="margin-top:8px">
+        <button data-action="export">Export JSON</button>
+        <label class="row"><button type="button" data-action="import-pick">Import JSON</button>
+          <input type="file" accept="application/json,.json" data-change="import" hidden></label>
+        <span class="spacer"></span>
+        <button class="danger" data-action="reset">Reset everything</button>
+      </div>
+      <p class="small muted">Importing replaces everything in this browser with the file's contents.</p>
+    </div>`;
+};
+
+FORMS.bulk = (form, fd) => {
+  const mode = fd.get('mode');
+  const text = String(fd.get('text') ?? '');
+  const report = bulkApply(text, mode);
+  ui.bulk = { mode, text: report.unmatched.join('\n'), report };
+  save(`Added ${report.matched.length} line${report.matched.length === 1 ? '' : 's'}`);
+  render();
+};
+CHANGES['bulk-mode'] = (el) => {
+  ui.bulk.mode = el.value;
+  ui.bulk.text = view.querySelector('textarea[name=text]')?.value ?? '';
+  render();
+};
+ACTIONS.export = () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `lokisvault-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('Backup downloaded');
+};
+ACTIONS['import-pick'] = () => view.querySelector('input[data-change=import]')?.click();
+CHANGES.import = async (el) => {
+  const file = el.files?.[0];
+  if (!file) return;
+  try {
+    const raw = JSON.parse(await file.text());
+    if (!raw || typeof raw !== 'object' || raw.v !== 1) throw new Error('not a Loki’s Vault backup');
+    if (!confirm('Replace everything in this browser with this backup?')) return;
+    state = sanitize(raw);
+    save('Backup imported');
+    render();
+  } catch (err) {
+    toast(`Import failed: ${err.message}`);
+  }
+};
+ACTIONS.reset = () => {
+  if (!confirm('Delete every relic, part, wishlist set and mastery mark stored in this browser? Export a backup first if unsure.')) return;
+  state = emptyState();
+  save('Vault reset');
+  render();
+};
 
 // ---- Rendering and events --------------------------------------------------
 
