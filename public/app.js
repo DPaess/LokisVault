@@ -159,8 +159,7 @@ VIEWS.overview = () => {
 
   const topRelics = useful
     .map((r) => ({ r, n: usefulRelic(r) }))
-    .sort((a, b) => b.n - a.n || relicTotal(b.r) - relicTotal(a.r))
-    .slice(0, 5);
+    .sort((a, b) => b.n - a.n || relicTotal(b.r) - relicTotal(a.r));
   const noSource = Object.keys(need).filter(
     (p) => missingOf(need, p) > 0 && !(DATA.parts[p]?.relics ?? []).some((r) => relicTotal(r) > 0),
   );
@@ -180,21 +179,48 @@ VIEWS.overview = () => {
       <h3>Next steps</h3>
       ${
         topRelics.length
-          ? `<p class="muted small">Your relics with the most parts you still need. Crack these first.</p>
-             <div class="rewards">${topRelics
-               .map(({ r, n }) => `<div class="reward"><span><b>${esc(r)}</b> <span class="muted">×${relicTotal(r)}</span></span><span class="meta">${n} needed part${n > 1 ? 's' : ''}</span></div>`)
-               .join('')}</div>`
+          ? `<p class="muted small">Your relics with the most parts you still need. Crack these first. Click one to see what it drops, your wishlist parts are in blue.</p>
+             ${showMore(
+               topRelics.map(
+                 ({ r, n }) => `<details class="expand">
+                   <summary class="reward"><span><b>${esc(r)}</b> <span class="muted">${countsShort(r)}</span> ${relicBadge(r)}</span><span class="meta">${n} needed part${n > 1 ? 's' : ''}</span></summary>
+                   <div class="rewards">${DATA.relics[r].rewards.map((w) => rewardLine(w, bestRef(r), need)).join('')}</div>
+                   <div class="small muted">Chances for ${REF_LABEL[bestRef(r)].toLowerCase()}. <a href="#relics">Open Relics</a></div>
+                 </details>`,
+               ),
+               5,
+             )}`
           : `<p class="muted">No owned relic contains a part your wishlist still needs.</p>`
       }
       ${
         noSource.length
-          ? `<p class="muted small" style="margin-top:14px">Needed parts you own no relic for. See <a href="#wishlist">Wishlist</a> for where to farm or buy them.</p>
-             <div class="rewards">${noSource
-               .map((p) => `<div class="reward"><span>${esc(p)}</span><span class="meta">${DATA.parts[p]?.farmable ? '<span class="badge farm">Farmable</span>' : '<span class="badge vault">Vaulted</span>'}</span></div>`)
-               .join('')}</div>`
+          ? `<p class="muted small" style="margin-top:14px">Needed parts you own no relic for. Click one to see where to farm or buy it.</p>
+             ${showMore(
+               noSource.map(
+                 (p) => `<details class="expand">
+                   <summary class="reward"><span>${esc(p)} <span class="muted small">${esc(partSets(p).join(', '))}</span></span><span class="meta">${DATA.parts[p]?.farmable ? '<span class="badge farm">Farmable</span>' : '<span class="badge vault">Vaulted</span>'}</span></summary>
+                   <div class="where small">${whereToGet(p)}</div>
+                 </details>`,
+               ),
+               8,
+             )}`
           : ''
       }
     </div>`;
+};
+
+// A list that shows its first `first` items and reveals the rest in place, so open items stay open.
+function showMore(items, first) {
+  if (items.length <= first) return `<div class="rewards">${items.join('')}</div>`;
+  return `<div class="rewards" data-more>
+      ${items.map((it, i) => (i < first ? it : `<div class="extra">${it}</div>`)).join('')}
+      <button class="small ghost" data-action="more" data-n="${items.length - first}">Show ${items.length - first} more</button>
+    </div>`;
+}
+ACTIONS.more = (el) => {
+  const box = el.closest('[data-more]');
+  const all = box.classList.toggle('show-all');
+  el.textContent = all ? 'Show fewer' : `Show ${el.dataset.n} more`;
 };
 
 // ---- Relics ------------------------------------------------------------------
