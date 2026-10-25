@@ -582,6 +582,90 @@ ACTIONS['mastery-bulk'] = (el) => {
   render();
 };
 
+// ---- Sell or ducat ---------------------------------------------------------------
+
+function verdictFor(part) {
+  const price = priceOf(part);
+  const ducats = DATA.parts[part]?.ducats ?? 0;
+  if (price == null || price <= 0) return { key: 'hold', label: 'Hold', ratio: null };
+  const ratio = ducats / price;
+  return ratio >= state.settings.ducatRatio ? { key: 'ducat', label: 'Ducats', ratio } : { key: 'sell', label: 'Sell', ratio };
+}
+
+// Complete sets you could assemble from spare parts alone, where the set sells for more than its parts.
+function spareSets(need) {
+  const out = [];
+  for (const [set, s] of Object.entries(DATA.sets)) {
+    const k = Math.min(...s.parts.map((p) => Math.floor(spareOf(need, p.name) / p.count)));
+    if (!(k >= 1)) continue;
+    const setP = setPrice(set);
+    const partsP = s.parts.every((p) => priceOf(p.name) != null) ? sum(s.parts.map((p) => priceOf(p.name) * p.count)) : null;
+    if (setP != null && partsP != null && setP > partsP) out.push({ set, k, setP, partsP });
+  }
+  return out.sort((a, b) => b.setP - b.partsP - (a.setP - a.partsP));
+}
+
+VIEWS.trade = () => {
+  const need = needs();
+  const rows = Object.keys(state.parts)
+    .map((p) => ({ p, n: spareOf(need, p), price: priceOf(p), buy: priceEntry(p)?.buy ?? null, ducats: DATA.parts[p]?.ducats ?? 0, v: verdictFor(p) }))
+    .filter((r) => r.n > 0);
+  const order = { sell: 0, ducat: 1, hold: 2 };
+  rows.sort((a, b) => order[a.v.key] - order[b.v.key] || (b.price ?? 0) * b.n - (a.price ?? 0) * a.n || a.p.localeCompare(b.p));
+  const sellPile = rows.filter((r) => r.v.key === 'sell');
+  const ducatPile = rows.filter((r) => r.v.key === 'ducat');
+  const sets = spareSets(need);
+
+  return `
+    ${head('Sell or ducat', 'Spare parts are the ones you own beyond what your wishlist needs. Prices are the median of the five cheapest sellers online on warframe.market, refreshed daily.')}
+    <div class="panel" style="margin-bottom:14px">
+      <label class="row">Trade for ducats when one plat is worth at least
+        <input type="number" min="1" step="1" value="${state.settings.ducatRatio}" data-change="ratio" data-focus="ratio" aria-label="Ducats per plat"> ducats</label>
+      <p class="small muted" style="margin:6px 0 0">A part that sells for 5p and gives 100 ducats returns 20 ducats per plat, so it goes to Baro at a threshold of 10. Lower the number to send more to Baro.</p>
+    </div>
+    ${
+      rows.length
+        ? `<div class="table-wrap"><table>
+            <thead><tr><th>Part</th><th class="num">Spare</th><th class="num">Price</th><th class="num">Best buy</th><th class="num">Ducats</th><th class="num">D / p</th><th>Verdict</th><th class="num">Stack</th></tr></thead>
+            <tbody>${rows
+              .map(
+                (r) => `<tr>
+                  <td>${marketUrl(r.p) ? `<a href="${esc(marketUrl(r.p))}" target="_blank" rel="noopener">${esc(r.p)}</a>` : esc(r.p)}${priceEntry(r.p)?.stale ? ' <span class="badge" title="Last refresh failed, showing an older price">old</span>' : ''}</td>
+                  <td class="num">${r.n}</td>
+                  <td class="num">${fmtP(r.price)}</td>
+                  <td class="num">${fmtP(r.buy)}</td>
+                  <td class="num">${fmtD(r.ducats)}</td>
+                  <td class="num">${r.v.ratio == null ? '–' : fmtNum(r.v.ratio, 1)}</td>
+                  <td><span class="verdict ${r.v.key}">${r.v.label}</span></td>
+                  <td class="num">${r.v.key === 'ducat' ? fmtD(r.ducats * r.n) : fmtP(r.price == null ? null : r.price * r.n)}</td>
+                </tr>`,
+              )
+              .join('')}</tbody>
+          </table></div>
+          <div class="grid stats" style="margin-top:14px">
+            ${stat('Sell pile', fmtP(sum(sellPile.map((r) => r.price * r.n))), `${sum(sellPile.map((r) => r.n))} parts`)}
+            ${stat('Ducat pile', fmtD(sum(ducatPile.map((r) => r.ducats * r.n))), `${sum(ducatPile.map((r) => r.n))} parts for Baro Ki'Teer`)}
+          </div>`
+        : '<div class="empty">No spare parts. Everything you own is needed by your wishlist, or you have not added parts yet.</div>'
+    }
+    ${
+      sets.length
+        ? `<div class="panel" style="margin-top:14px"><h3>Sell these as full sets</h3>
+            <p class="small muted">Your spare parts complete these sets, and the set sells for more than the parts one by one.</p>
+            <div class="rewards">${sets
+              .map((s) => `<div class="reward"><span><b>${esc(s.set)}</b>${s.k > 1 ? ` ×${s.k}` : ''}</span><span class="meta">set ${fmtP(s.setP)} vs parts ${fmtP(s.partsP)} (+${fmtP(s.setP - s.partsP)})</span></div>`)
+              .join('')}</div></div>`
+        : ''
+    }`;
+};
+
+CHANGES.ratio = (el) => {
+  const v = Number(el.value);
+  if (v > 0) state.settings.ducatRatio = v;
+  save('Threshold saved');
+  render();
+};
+
 const todo = (title) => () => `${head(title)}<div class="empty">Coming soon.</div>`;
 for (const [tab, title] of Object.entries({ relics: 'Relics', parts: 'Prime parts', wishlist: 'Wishlist', mastery: 'Mastery', trade: 'Sell or ducat', data: 'Data' })) {
   VIEWS[tab] ??= todo(title);
