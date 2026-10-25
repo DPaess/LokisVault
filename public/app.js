@@ -511,22 +511,22 @@ const partSortKey = (p) => `${partSets(p)[0] ?? '~'}|${p}`;
 // A part's type is the category of its set (Warframe, Primary, Melee...).
 const partType = (p) => DATA.sets[partSets(p)[0]]?.category ?? 'Other';
 function partsShown() {
-  const f = (ui.parts ??= { q: '', type: '', sort: 'set' });
+  const f = (ui.parts ??= { q: '', type: '', sort: 'set', dir: 'asc' });
   const q = norm(f.q);
   const all = Object.keys(state.parts);
   if (f.type && !all.some((p) => partType(p) === f.type)) f.type = '';
   return all
     .filter((p) => (!f.type || partType(p) === f.type) && (!q || norm(p).includes(q) || partSets(p).some((s) => norm(s).includes(q))))
-    .sort((a, b) => (PART_SORTS[f.sort] ?? PART_SORTS.set)(a, b) || a.localeCompare(b));
+    .sort((a, b) => (f.dir === 'desc' ? -1 : 1) * (PART_SORTS[f.sort] ?? PART_SORTS.set)(a, b) || a.localeCompare(b));
 }
+// Ascending comparisons per column, the header click picks the column and direction.
 const PART_SORTS = {
-  set: (a, b) => partSortKey(a).localeCompare(partSortKey(b)),
   name: (a, b) => a.localeCompare(b),
-  owned: (a, b) => owned(b) - owned(a),
-  needed: (a, b) => (needs()[b] ?? 0) - (needs()[a] ?? 0),
-  ducats: (a, b) => (DATA.parts[b]?.ducats ?? 0) - (DATA.parts[a]?.ducats ?? 0),
-  price: (a, b) => (priceOf(b) ?? -1) - (priceOf(a) ?? -1),
-  stack: (a, b) => (priceOf(b) ?? 0) * owned(b) - (priceOf(a) ?? 0) * owned(a),
+  set: (a, b) => partSortKey(a).localeCompare(partSortKey(b)),
+  owned: (a, b) => owned(a) - owned(b),
+  needed: (a, b) => (needs()[a] ?? 0) - (needs()[b] ?? 0),
+  ducats: (a, b) => (DATA.parts[a]?.ducats ?? 0) - (DATA.parts[b]?.ducats ?? 0),
+  price: (a, b) => (priceOf(a) ?? -1) - (priceOf(b) ?? -1),
 };
 
 VIEWS.parts = () => {
@@ -561,12 +561,9 @@ VIEWS.parts = () => {
       total
         ? `<div class="toolbar">
              <input class="grow" type="search" placeholder="Search your parts or sets" value="${esc(f.q ?? '')}" data-input="parts-q" data-focus="parts-q">
-             <select data-change="parts-sort" aria-label="Sort">${[['set', 'Sort by set'], ['name', 'Name'], ['price', 'Price'], ['stack', 'Stack value'], ['ducats', 'Ducats'], ['owned', 'Owned'], ['needed', 'Needed']]
-               .map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`)
-               .join('')}</select>
-             <select data-change="parts-type" aria-label="Type"><option value="">All types</option>${types
+             <label class="field">Category<select data-change="parts-type"><option value="">All</option>${types
                .map((t) => `<option value="${esc(t)}"${f.type === t ? ' selected' : ''}>${esc(t)} (${Object.keys(state.parts).filter((p) => partType(p) === t).length})</option>`)
-               .join('')}</select>
+               .join('')}</select></label>
              <span class="spacer"></span>
              <span class="muted small">${names.length} of ${total} kinds shown</span>
              <button class="small danger" data-action="parts-remove-shown">${names.length === total ? `Remove all ${total}` : `Remove these ${names.length}`}</button>
@@ -584,7 +581,9 @@ VIEWS.parts = () => {
     ${
       names.length
         ? `<div class="table-wrap"><table>
-             <thead><tr><th>Part</th><th>Set</th><th class="num">Owned</th><th class="num">Needed</th><th class="num">Ducats</th><th class="num">Price</th><th></th></tr></thead>
+             <thead><tr>${['name|Part|', 'set|Set|', 'owned|Owned|num', 'needed|Needed|num', 'ducats|Ducats|num', 'price|Price|num']
+               .map((c) => sortHeader('parts', f, ...c.split('|')))
+               .join('')}<th></th></tr></thead>
              <tbody>${rows.join('')}</tbody>
            </table></div>
            ${pg.more}
@@ -610,10 +609,6 @@ CHANGES['part-count'] = (el) => {
 };
 INPUTS['parts-q'] = (el) => {
   ui.parts.q = el.value;
-  render();
-};
-CHANGES['parts-sort'] = (el) => {
-  ui.parts.sort = el.value;
   render();
 };
 CHANGES['parts-type'] = (el) => {
@@ -830,14 +825,17 @@ ACTIONS['wish-built'] = (el) => {
 // ---- Mastery -------------------------------------------------------------------
 
 function masteryShown() {
-  const f = (ui.mastery ??= { q: '', category: '', prime: '', status: 'todo', sort: 'name' });
+  const f = (ui.mastery ??= { q: '', category: '', prime: '', status: 'todo', sort: 'name', dir: 'asc' });
   const q = norm(f.q);
+  // Ascending comparisons per column, the header click picks the column and direction.
   const sorters = {
     name: (a, b) => a.name.localeCompare(b.name),
-    xp: (a, b) => b.xp - a.xp,
-    mr: (a, b) => (b.mr ?? 0) - (a.mr ?? 0),
     category: (a, b) => a.category.localeCompare(b.category),
+    type: (a, b) => (a.type ?? '').localeCompare(b.type ?? ''),
+    xp: (a, b) => a.xp - b.xp,
+    mr: (a, b) => (a.mr ?? 0) - (b.mr ?? 0),
   };
+  const sign = f.dir === 'desc' ? -1 : 1;
   return masteryItems()
     .filter(
       (m) =>
@@ -846,7 +844,7 @@ function masteryShown() {
         (!f.prime || (f.prime === 'prime') === m.prime) &&
         (!f.status || (f.status === 'done') === Boolean(state.mastered[m.id])),
     )
-    .sort((a, b) => (sorters[f.sort] ?? sorters.name)(a, b) || a.name.localeCompare(b.name));
+    .sort((a, b) => sign * (sorters[f.sort] ?? sorters.name)(a, b) || a.name.localeCompare(b.name));
 }
 
 VIEWS.mastery = () => {
@@ -879,10 +877,9 @@ VIEWS.mastery = () => {
     </div>
     <div class="toolbar">
       <input class="grow" type="search" placeholder="Search" value="${esc(f.q)}" data-input="mastery-q" data-focus="mastery-q">
-      <select data-change="mastery-filter" data-key="category" aria-label="Category">${opt('', 'All categories', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select>
-      <select data-change="mastery-filter" data-key="prime" aria-label="Prime">${opt('', 'Prime and non prime', f.prime)}${opt('prime', 'Prime only', f.prime)}${opt('normal', 'Non prime only', f.prime)}</select>
-      <select data-change="mastery-filter" data-key="status" aria-label="Status">${opt('todo', 'Not mastered', f.status)}${opt('done', 'Mastered', f.status)}${opt('', 'Any status', f.status)}</select>
-      <select data-change="mastery-filter" data-key="sort" aria-label="Sort">${opt('name', 'Sort by name', f.sort ?? 'name')}${opt('xp', 'Mastery points', f.sort)}${opt('mr', 'MR requirement', f.sort)}${opt('category', 'Category', f.sort)}</select>
+      <label class="field">Category<select data-change="mastery-filter" data-key="category">${opt('', 'All', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select></label>
+      <label class="field">Prime<select data-change="mastery-filter" data-key="prime">${opt('', 'Both', f.prime)}${opt('prime', 'Prime only', f.prime)}${opt('normal', 'Non prime only', f.prime)}</select></label>
+      <label class="field">Status<select data-change="mastery-filter" data-key="status">${opt('todo', 'Not mastered', f.status)}${opt('done', 'Mastered', f.status)}${opt('', 'Any', f.status)}</select></label>
     </div>
     <div class="toolbar">
       <span class="muted small">${shown.length} match, ${fmtNum(masteryXp(shown.filter((m) => !state.mastered[m.id])))} points still to earn among them</span>
@@ -893,7 +890,9 @@ VIEWS.mastery = () => {
     ${
       shown.length
         ? `<div class="table-wrap"><table>
-             <thead><tr><th></th><th>Name</th><th>Category</th><th class="hide-sm">Type</th><th class="num">XP</th><th class="num">MR</th><th></th></tr></thead>
+             <thead><tr><th></th>${['name|Name|', 'category|Category|', 'type|Type|hide-sm', 'xp|XP|num', 'mr|MR|num']
+               .map((c) => sortHeader('mastery', f, ...c.split('|')))
+               .join('')}<th></th></tr></thead>
              <tbody>${rows.join('')}</tbody>
            </table></div>
            ${pg.more}`
