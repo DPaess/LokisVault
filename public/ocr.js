@@ -51,7 +51,30 @@ function otsu(hist, total) {
   return cut;
 }
 
-// Scales the screenshot up and returns one black on white canvas per pass.
+// How lit the item icon above a name is: the share of bright pixels in the square just above it.
+// Owned relics show a bright gold or silver icon (4 to 16% of pixels on real screenshots),
+// relics you do not own are greyed out (under 0.2%).
+export function iconLight(grey, w, h) {
+  return ({ x0, y0, x1 }) => {
+    const size = x1 - x0;
+    const cx = (x0 + x1) / 2;
+    const left = Math.max(0, Math.round(cx - 0.4 * size));
+    const right = Math.min(w, Math.round(cx + 0.4 * size));
+    const top = Math.max(0, Math.round(y0 - size));
+    const bottom = Math.min(h, Math.round(y0 - 0.15 * size));
+    let lit = 0;
+    let all = 0;
+    for (let y = top; y < bottom; y++)
+      for (let x = left; x < right; x++) {
+        all++;
+        if (grey[y * w + x] >= 150) lit++;
+      }
+    return all ? lit / all : 0;
+  };
+}
+
+// Scales the screenshot up and returns one black on white canvas per pass, plus the brightness
+// channel for iconLight.
 async function prepareImage(blob) {
   const bmp = await createImageBitmap(blob);
   const scale = Math.min(3, Math.max(1, 2400 / bmp.width));
@@ -70,7 +93,7 @@ async function prepareImage(blob) {
     channels.min[j] = Math.min(src[i], src[i + 1], src[i + 2]);
     channels.max[j] = Math.max(src[i], src[i + 1], src[i + 2]);
   }
-  return PASSES.map(({ channel, cut, dark }) => {
+  const canvases = PASSES.map(({ channel, cut, dark }) => {
     const grey = channels[channel];
     if (cut === 'otsu') {
       const hist = new Uint32Array(256);
@@ -91,9 +114,11 @@ async function prepareImage(blob) {
     octx.putImageData(img, 0, 0);
     return out;
   });
+  return { canvases, light: iconLight(channels.max, w, h) };
 }
 
-// Returns, for each image, one array of words (with boxes and confidence) per pass.
+// Returns, for each image, { passes, light }: one array of words (with boxes and confidence) per
+// pass, and iconLight for that image.
 export async function readImages(blobs, onProgress = () => {}) {
   const T = await loadEngine();
   let step = '';
@@ -111,7 +136,7 @@ export async function readImages(blobs, onProgress = () => {}) {
       step = `Preparing image ${i + 1} of ${blobs.length}…`;
       onProgress(step);
       const passes = [];
-      const canvases = await prepareImage(blobs[i]);
+      const { canvases, light } = await prepareImage(blobs[i]);
       for (let k = 0; k < canvases.length; k++) {
         step = `Reading image ${i + 1} of ${blobs.length}, pass ${k + 1} of ${canvases.length}…`;
         const { data } = await worker.recognize(canvases[k]);
@@ -121,7 +146,7 @@ export async function readImages(blobs, onProgress = () => {}) {
             .map((w) => ({ text: w.text, conf: w.confidence, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 })),
         );
       }
-      out.push(passes);
+      out.push({ passes, light });
     }
     return out;
   } finally {
@@ -227,6 +252,11 @@ export function groupTiles(words, read = () => true) {
     let bestD = Infinity;
     for (const t of tiles) {
       if (!t.hit || t.qty != null || t.y1 < w.y0 - h) continue; // only names below or level with the number
+      // The count sits in the top left corner of its own tile, so it is left of the name's centre
+      // but never past it: this keeps a neighbour's count from landing on a tile without one.
+      const tw = t.x1 - t.x0;
+      const off = cx - (t.x0 + t.x1) / 2;
+      if (off > 0.3 * tw || off < -(tw / 2 + 4 * h)) continue;
       const dx = cx < t.x0 ? t.x0 - cx : cx > t.x1 ? cx - t.x1 : 0;
       const dy = Math.max(0, t.y0 - w.y1);
       if (dx > 6 * h || dy > 10 * h) continue;
@@ -244,6 +274,13 @@ export function groupTiles(words, read = () => true) {
 // takes the item most passes agree on (a single pass misreading "Neo O2" as "Neo O3" is outvoted).
 // The quantity is the count most of those passes saw, 1 when none saw one.
 // Text no pass could match, at a spot where no item was found, comes back as unread.
+const overlap = (a, b) => {
+  const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  if (w <= 0 || h <= 0) return 0;
+  return (w * h) / Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
+};
+
 export function combinePasses(passes, read) {
   const spots = [];
   const unread = [];
@@ -253,14 +290,14 @@ export function combinePasses(passes, read) {
         if (k === 0) unread.push(tile);
         continue;
       }
-      const cx = (tile.x0 + tile.x1) / 2;
-      const cy = (tile.y0 + tile.y1) / 2;
-      let spot = spots.find((s) => cx > s.x0 && cx < s.x1 && cy > s.y0 && cy < s.y1);
+      // Same spot when the boxes overlap enough: icon junk can stretch one pass's box upwards.
+      let spot = spots.find((s) => overlap(s, tile) > 0.3);
       if (!spot) spots.push((spot = { x0: tile.x0, y0: tile.y0, x1: tile.x1, y1: tile.y1, reads: [] }));
-      spot.reads.push({ ...tile.hit, qty: tile.qty, read: tile.text });
+      spot.reads.push({ ...tile.hit, qty: tile.qty, read: tile.text, box: { x0: tile.x0, y0: tile.y0, x1: tile.x1, y1: tile.y1 } });
     }
   });
   const items = new Map();
+  const area = (b) => (b.x1 - b.x0) * (b.y1 - b.y0);
   for (const { reads } of spots) {
     const tally = (xs) => {
       const m = new Map();
@@ -269,8 +306,14 @@ export function combinePasses(passes, read) {
     };
     const key = tally(reads.map((r) => r.key));
     const mine = reads.filter((r) => r.key === key);
-    const item = { ...mine[0], qty: tally(mine.map((r) => r.qty)) ?? 1 };
-    if (!items.has(key) || items.get(key).qty < item.qty) items.set(key, item);
+    // The tightest box is the cleanest read of the name, without junk picked up from the icon art.
+    const box = mine.reduce((a, r) => (area(r.box) < area(a) ? r.box : a), mine[0].box);
+    // Unsure when the passes disagreed on this spot or only one pass could read it.
+    const sure = mine.length >= 2 && mine.length === reads.length;
+    const item = { ...mine[0], qty: tally(mine.map((r) => r.qty)) ?? 1, box, votes: mine.length, sure };
+    // One tile per item on a screen: if a name shows up at two spots, trust the better supported one.
+    const prev = items.get(key);
+    if (!prev || prev.votes < item.votes || (prev.votes === item.votes && prev.qty < item.qty)) items.set(key, item);
   }
   const inSpot = (t) => spots.some((s) => t.x0 < s.x1 && t.x1 > s.x0 && t.y0 < s.y1 && t.y1 > s.y0);
   return { items: [...items.values()], unread: [...new Set(unread.filter((t) => !inSpot(t)).map((t) => t.text))] };

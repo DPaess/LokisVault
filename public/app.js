@@ -922,6 +922,40 @@ function readMasteryTile(words) {
   return { ...item, key: shotRowKey(item) };
 }
 
+// Relic codes are one letter then digits ("S18", "I1", "Z7"). OCR swaps look-alikes both ways
+// ("Z7" comes back as "77", "A4" as "Ad"), so every likely reading is tried and only codes of real
+// relics count. When two real relics fit, this pass stays silent and the other passes decide.
+const fuzzyEra = createFuzzy(['lith', 'meso', 'neo', 'axi', 'requiem', 'vanguard'].map((e) => ({ key: e, value: e })));
+const AS_LETTER = { 0: 'od', 1: 'i', l: 'i', 2: 'z', 4: 'a', 5: 's', 6: 'g', 7: 'tz', 8: 'b' };
+const AS_DIGIT = { o: '0', d: '04', i: '1', l: '1', t: '17', z: '2', s: '5', g: '6', b: '68', q: '9', a: '4' };
+function codeReadings(raw) {
+  if (raw.length < 2 || raw.length > 4) return [];
+  const firsts = /[a-z]/.test(raw[0]) ? [raw[0]] : [...(AS_LETTER[raw[0]] ?? '')];
+  let codes = firsts;
+  for (const c of raw.slice(1)) {
+    const opts = /\d/.test(c) ? [c] : [...(AS_DIGIT[c] ?? '')];
+    codes = codes.flatMap((code) => opts.map((o) => code + o));
+  }
+  return codes;
+}
+function readRelicCode(words) {
+  const found = new Set();
+  for (let i = 0; i < words.length; i++) {
+    const era = words[i].length >= 3 && fuzzyEra(words[i], 0.34);
+    if (!era) continue;
+    // The code normally follows the era, but some reads come back as "75 Relic Neo".
+    for (const raw of [words[i + 1], words[i - 1]]) {
+      if (!raw || raw === 'relic') continue;
+      for (const code of codeReadings(raw)) {
+        const name = resolveRelic(`${era} ${code}`);
+        if (name) found.add(name);
+      }
+    }
+    if (found.size) break;
+  }
+  return found.size === 1 ? [...found][0] : null;
+}
+
 function readTile(tile) {
   const all = norm(tile.text).split(' ');
   if (all.includes('rank')) return all.includes('max') ? readMasteryTile(all) : null;
@@ -933,7 +967,8 @@ function readTile(tile) {
       if (r) ref = r;
       return !r;
     });
-  const hit = words.length ? matchReadText(words.join(' ')) : null;
+  const relic = readRelicCode(words);
+  const hit = relic ? { kind: 'relic', name: relic } : words.length ? matchReadText(words.join(' ')) : null;
   if (!hit) return null;
   // The quantity comes from the count drawn on the tile, never from numbers inside the name text.
   const item = { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? ref : null };
@@ -957,16 +992,22 @@ async function runShots(files) {
     // Screenshots taken while scrolling overlap, so an item seen twice counts once, at its highest quantity.
     const rows = new Map(sh.rows.map((r) => [shotRowKey(r), r]));
     const unread = new Set(sh.unread);
-    for (const passes of pages) {
+    for (const { passes, light } of pages) {
       const found = combinePasses(passes, readTile);
-      for (const { key, kind, name, ref, qty, read } of found.items) {
+      for (const { key, kind, name, ref, qty, read, box, sure } of found.items) {
+        // The relic screen also lists relics you do not own, with a greyed out icon.
+        if (kind === 'relic' && light(box) < 0.015) {
+          sh.greyed = (sh.greyed ?? 0) + 1;
+          continue;
+        }
         const prev = rows.get(key);
-        if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, on: true, ok: true });
+        if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, sure: sure || Boolean(prev?.sure), on: true, ok: true, replace: false });
       }
       // Only text that looks like an item name is worth showing, not menu labels.
       for (const t of found.unread) if (/\b(prime|relic|blueprint)\b/i.test(t) && !/\brank\b/i.test(t)) unread.add(t);
     }
-    sh.rows = [...rows.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, 'en', { numeric: true }));
+    // Rows the passes disagreed on come first, they are the ones worth checking.
+    sh.rows = [...rows.values()].sort((a, b) => a.sure - b.sure || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, 'en', { numeric: true }));
     sh.unread = [...unread];
     toast(`Found ${sh.rows.length} item${sh.rows.length === 1 ? '' : 's'}, check them before adding`);
   } catch (err) {
@@ -977,20 +1018,39 @@ async function runShots(files) {
   }
 }
 
+// What the vault holds now for a review row.
+function shotHave(r) {
+  if (r.kind === 'mastery') return masteryItems().some((m) => m.name === r.name && state.mastered[m.id]) ? 1 : 0;
+  if (r.kind === 'relic') return state.relics[r.name]?.[r.ref] ?? 0;
+  return owned(r.name);
+}
+
 function shotsPanel() {
-  const sh = (ui.shots ??= { busy: false, progress: '', rows: [], unread: [] });
+  const sh = (ui.shots ??= { busy: false, progress: '', rows: [], unread: [], greyed: 0 });
   const checked = sh.rows.filter((r) => r.on && r.ok).length;
+  const owning = sh.rows.filter((r) => r.ok && r.kind !== 'mastery' && shotHave(r) > 0);
+  const unsure = sh.rows.filter((r) => !r.sure).length;
+  const vaultCell = (r, i) => {
+    const have = shotHave(r);
+    if (r.kind === 'mastery') return have ? '<span class="muted small">Already mastered</span>' : '<span class="muted small">New</span>';
+    if (!have) return '<span class="muted small">New</span>';
+    return `<span class="warn small">Have ${have}</span>
+      <label class="small"><input type="checkbox" ${r.replace ? 'checked' : ''} data-change="shot-field" data-field="replace" data-i="${i}"> Replace</label>
+      <div class="small muted">${r.replace ? `Will be set to ${r.qty}` : `Will become ${have + r.qty}`}</div>`;
+  };
   const rows = sh.rows.map(
     (r, i) => `<tr class="${r.on ? '' : 'dim'}">
       <td><input type="checkbox" ${r.on ? 'checked' : ''} data-change="shot-field" data-field="on" data-i="${i}" aria-label="Add this item"></td>
       <td><input class="grow" list="${r.kind === 'mastery' ? 'dl-mastery' : 'dl-inventory'}" value="${esc(r.name)}" data-change="shot-name" data-i="${i}" data-focus="shot-name:${i}" aria-label="Item">
-        ${r.ok ? '' : '<div class="miss small">Unknown name, pick one from the list</div>'}</td>
+        ${r.ok ? '' : '<div class="miss small">Unknown name, pick one from the list</div>'}
+        ${r.sure ? '' : '<span class="badge check" title="The reading passes disagreed on this tile, or only one could read it. Compare with the Read as column.">check</span>'}</td>
       <td>${
         r.kind === 'relic'
           ? `<select data-change="shot-field" data-field="ref" data-i="${i}" aria-label="Refinement">${REFS.map((x) => `<option value="${x}"${r.ref === x ? ' selected' : ''}>${REF_LABEL[x]}</option>`).join('')}</select>`
           : `<span class="muted small">${r.kind === 'mastery' ? 'Mastered' : 'Part'}</span>`
       }</td>
       <td class="num">${r.kind === 'mastery' ? '' : `<input type="number" min="1" value="${r.qty}" data-change="shot-field" data-field="qty" data-i="${i}" data-focus="shot-qty:${i}" aria-label="Quantity">`}</td>
+      <td>${vaultCell(r, i)}</td>
       <td class="muted small hide-sm">${esc(r.read)}</td>
     </tr>`,
   );
@@ -1007,15 +1067,19 @@ function shotsPanel() {
       </div>
       ${
         sh.rows.length
-          ? `<div class="table-wrap" style="margin-top:12px"><table>
-               <thead><tr><th></th><th>Item</th><th>Refinement</th><th class="num">Qty</th><th class="hide-sm">Read as</th></tr></thead>
+          ? `${sh.greyed ? `<p class="small muted" style="margin-top:12px">Skipped ${sh.greyed} greyed out relic${sh.greyed === 1 ? '' : 's'} you do not own.</p>` : ''}
+             ${unsure ? `<p class="small"><span class="badge check">check</span> ${unsure} row${unsure === 1 ? '' : 's'} where the reading passes disagreed are listed first. Look at those names before adding, misreads such as S3 for B3 end up there.</p>` : ''}
+             ${owning.length ? `<p class="small"><span class="warn">${owning.length} of these are already in your vault.</span> By default the new quantity is added to what you have. Tick Replace to set it to the screenshot's number instead, which is what you want when re-scanning a screen.</p>` : ''}
+             <div class="table-wrap" style="margin-top:12px"><table>
+               <thead><tr><th></th><th>Item</th><th>Refinement</th><th class="num">Qty</th><th>In vault</th><th class="hide-sm">Read as</th></tr></thead>
                <tbody>${rows.join('')}</tbody>
              </table></div>
              <div class="toolbar">
                <button class="primary" data-action="shots-add" ${checked ? '' : 'disabled'}>Add ${checked} checked to vault</button>
                <button class="ghost" data-action="shots-clear">Discard</button>
+               ${owning.length ? `<button class="small" data-action="shots-replace-all" data-value="${owning.every((r) => r.replace) ? '0' : '1'}">${owning.every((r) => r.replace) ? 'Add to all instead' : `Replace all ${owning.length} already in vault`}</button>` : ''}
                <span class="spacer"></span>
-               <span class="small muted">Quantities are added to what you already have.</span>
+               <span class="small muted">Added to what you have unless Replace is ticked.</span>
              </div>`
           : ''
       }
@@ -1037,6 +1101,11 @@ CHANGES['shot-field'] = (el) => {
   if (el.dataset.field === 'on') row.on = el.checked;
   if (el.dataset.field === 'ref') row.ref = el.value;
   if (el.dataset.field === 'qty') row.qty = Math.max(1, Math.floor(Number(el.value) || 1));
+  if (el.dataset.field === 'replace') row.replace = el.checked;
+  render();
+};
+ACTIONS['shots-replace-all'] = (el) => {
+  for (const r of ui.shots.rows) if (r.ok && r.kind !== 'mastery' && shotHave(r) > 0) r.replace = el.dataset.value === '1';
   render();
 };
 CHANGES['shot-name'] = (el) => {
@@ -1044,11 +1113,11 @@ CHANGES['shot-name'] = (el) => {
   if (!row) return;
   if (row.kind === 'mastery') {
     const hits = matchMasteryLine(el.value);
-    Object.assign(row, hits.length ? { name: hits[0].name, ok: true, on: true } : { name: el.value, ok: false });
+    Object.assign(row, hits.length ? { name: hits[0].name, ok: true, on: true, sure: true } : { name: el.value, ok: false });
     return render();
   }
   const hit = matchInventoryLine(el.value) ?? matchReadText(el.value);
-  if (hit) Object.assign(row, { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? (row.ref ?? 'intact') : null, ok: true, on: true });
+  if (hit) Object.assign(row, { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? (row.ref ?? 'intact') : null, ok: true, on: true, sure: true });
   else Object.assign(row, { name: el.value, ok: false });
   render();
 };
@@ -1059,16 +1128,16 @@ ACTIONS['shots-add'] = () => {
       for (const m of masteryItems()) if (m.name === r.name) state.mastered[m.id] = true;
     } else if (r.kind === 'relic') {
       const c = (state.relics[r.name] ??= {});
-      c[r.ref] = (c[r.ref] ?? 0) + r.qty;
-    } else state.parts[r.name] = owned(r.name) + r.qty;
+      c[r.ref] = (r.replace ? 0 : (c[r.ref] ?? 0)) + r.qty;
+    } else state.parts[r.name] = (r.replace ? 0 : owned(r.name)) + r.qty;
   }
   ui.shots.rows = ui.shots.rows.filter((r) => !(r.on && r.ok));
-  if (!ui.shots.rows.length) ui.shots.unread = [];
+  if (!ui.shots.rows.length) Object.assign(ui.shots, { unread: [], greyed: 0 });
   save(`Added ${take.length} item${take.length === 1 ? '' : 's'} from screenshots`);
   render();
 };
 ACTIONS['shots-clear'] = () => {
-  Object.assign(ui.shots, { rows: [], unread: [] });
+  Object.assign(ui.shots, { rows: [], unread: [], greyed: 0 });
   render();
 };
 

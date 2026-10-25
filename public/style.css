@@ -204,3 +204,5 @@ details.expand > .rewards, details.expand > .where, details.expand > .small { ma
 details.expand .where b { color: var(--text); font-weight: 500; }
 [data-more]:not(.show-all) > .extra { display: none; }
 [data-more] > button { justify-self: start; }
+.warn { color: var(--warn); }
+.badge.check { color: var(--warn); background: rgba(240, 180, 90, 0.14); margin-left: 4px; }

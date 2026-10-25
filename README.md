@@ -28,13 +28,15 @@ Three screens work today:
 
 ![Prime Parts inventory screen](docs/screenshots/prime-parts.jpg)
 
-**Void Relics.** The relic name, the `x22` style count and the refinement (`[Radiant]`) are read. The "Possible Rewards" panel on the right is ignored, those are not items you own. Take one screenshot per era tab.
+**Void Relics.** The relic name, the `x22` style count and the refinement (`[Radiant]`) are read. The "Possible Rewards" panel on the right is ignored, those are not items you own, and so are greyed out relics (the ones with an eye icon instead of a count), which the screen lists although you do not have them. Take screenshots per era tab.
 
 ![Void Relics screen](docs/screenshots/void-relics.jpg)
 
 **Profile → Equipment.** Every tile showing **MAX RANK** is marked as mastered. Tiles still levelling (`RANK 28`) and greyed out items are skipped, and nothing is ever unmarked.
 
 ![Profile Equipment screen used for mastery](docs/screenshots/equipment-mastery.jpg)
+
+In the review table, rows marked **check** are the ones where the reading passes disagreed: on ten real relic screens every misread (such as S3 read as B3) was among them, so look at those first. Items already in your vault show what you have, and the default adds the new count on top. Tick **Replace** (or "Replace all") to set the vault to the screenshot's number instead, which is what you want when re-scanning a screen.
 
 Tips: scroll and keep taking screenshots, overlap is fine because an item seen twice counts once. Each screenshot is read in four passes, so allow a few seconds per image. Always glance over the review table, recognition is good but not perfect.
 
