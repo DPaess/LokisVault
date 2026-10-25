@@ -2,7 +2,7 @@
 // Game data comes from data/items.json and data/prices.json (built by scripts/).
 // The player's inventory lives in localStorage under STORE_KEY.
 
-import { readImages, groupTiles, dropRewardPanel, createFuzzy } from './ocr.js';
+import { readImages, combinePasses, createFuzzy } from './ocr.js';
 
 const STORE_KEY = 'lokisvault:v1';
 const REFS = ['intact', 'exceptional', 'flawless', 'radiant'];
@@ -757,16 +757,23 @@ const fuzzyInventory = () =>
     ]),
     ...Object.keys(DATA.parts).flatMap((p) => [
       { key: norm(p), value: `part|${p}` },
-      ...(p.endsWith(' Blueprint') ? [{ key: norm(p.slice(0, -10)), value: `part|${p}` }] : []),
+      // "Ash Prime Systems" may lose its "Blueprint" line, but a set's main blueprint must say so.
+      ...(p.endsWith(' Blueprint') && !DATA.sets[p.slice(0, -10)] ? [{ key: norm(p.slice(0, -10)), value: `part|${p}` }] : []),
     ]),
   ]));
 const fuzzyRef = createFuzzy(REFS.map((r) => ({ key: r, value: r })));
 
-// Exact match first (same rules as bulk paste), then the closest known name allowing OCR slips.
+// Exact name first, then the closest known name allowing OCR slips. Stricter than bulk paste:
+// a partly read tile such as "Aksomati Prime" must not turn into a blueprint by prefix.
 function matchReadText(text) {
-  const exact = matchInventoryLine(text);
-  if (exact) return exact;
-  for (const { qty, rest } of quantityReadings(text)) {
+  const readings = quantityReadings(text);
+  for (const { qty, rest } of readings) {
+    const relic = resolveRelic(rest);
+    if (relic) return { kind: 'relic', name: relic, qty: Math.max(1, qty) };
+    const part = partIndex().get(norm(rest));
+    if (part) return { kind: 'part', name: part, qty: Math.max(1, qty) };
+  }
+  for (const { qty, rest } of readings) {
     const hit = fuzzyInventory()(norm(rest));
     if (hit) {
       const [kind, name] = hit.split('|');
@@ -787,7 +794,9 @@ function readTile(tile) {
     });
   const hit = words.length ? matchReadText(words.join(' ')) : null;
   if (!hit) return null;
-  return { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? ref : null, qty: tile.qty || hit.qty || 1 };
+  // The quantity comes from the count drawn on the tile, never from numbers inside the name text.
+  const item = { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? ref : null };
+  return { ...item, key: shotRowKey(item) };
 }
 
 const shotRowKey = (r) => `${r.kind}|${r.name}|${r.ref ?? ''}`;
@@ -807,17 +816,14 @@ async function runShots(files) {
     // Screenshots taken while scrolling overlap, so an item seen twice counts once, at its highest quantity.
     const rows = new Map(sh.rows.map((r) => [shotRowKey(r), r]));
     const unread = new Set(sh.unread);
-    for (const words of pages) {
-      for (const tile of groupTiles(dropRewardPanel(words))) {
-        const hit = readTile(tile);
-        if (!hit) {
-          if (/[a-z]{3}.*[a-z]{3}/i.test(tile.text)) unread.add(tile.text);
-          continue;
-        }
-        const row = { ...hit, read: tile.text, on: true, ok: true };
-        const prev = rows.get(shotRowKey(row));
-        if (!prev || prev.qty < row.qty) rows.set(shotRowKey(row), row);
+    for (const passes of pages) {
+      const found = combinePasses(passes, readTile);
+      for (const { key, kind, name, ref, qty, read } of found.items) {
+        const prev = rows.get(key);
+        if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, on: true, ok: true });
       }
+      // Only text that looks like an item name is worth showing, not menu labels.
+      for (const t of found.unread) if (/\b(prime|relic|blueprint)\b/i.test(t)) unread.add(t);
     }
     sh.rows = [...rows.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, 'en', { numeric: true }));
     sh.unread = [...unread];
@@ -894,7 +900,7 @@ CHANGES['shot-field'] = (el) => {
 CHANGES['shot-name'] = (el) => {
   const row = ui.shots.rows[el.dataset.i];
   if (!row) return;
-  const hit = matchReadText(el.value);
+  const hit = matchInventoryLine(el.value) ?? matchReadText(el.value);
   if (hit) Object.assign(row, { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? (row.ref ?? 'intact') : null, ok: true, on: true });
   else Object.assign(row, { name: el.value, ok: false });
   render();

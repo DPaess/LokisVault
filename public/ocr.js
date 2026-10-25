@@ -19,8 +19,37 @@ function loadEngine() {
   }));
 }
 
-// Game text is light on a dark background. Tesseract reads dark on light best, so scale the
-// image up, make it grey, invert it when it is mostly dark and stretch the contrast.
+// Each screenshot is read several times, prepared differently, and the readings are combined.
+// Game text is light on a dark background behind busy item icons, and no single black and white
+// cut works for every screen: the darkest colour channel hides gold icons, the brightest keeps
+// coloured text. Measured on real inventory screenshots, these three together find nearly everything.
+const PASSES = [
+  { channel: 'min', cut: 120 },
+  { channel: 'min', cut: 'otsu' },
+  { channel: 'max', cut: 150 },
+];
+
+// Best split between dark and light for a histogram (Otsu's method).
+function otsu(hist, total) {
+  let sumAll = 0;
+  for (let i = 0; i < 256; i++) sumAll += i * hist[i];
+  let sumB = 0;
+  let wB = 0;
+  let best = 0;
+  let cut = 128;
+  for (let i = 0; i < 256; i++) {
+    wB += hist[i];
+    if (!wB) continue;
+    const wF = total - wB;
+    if (!wF) break;
+    sumB += i * hist[i];
+    const between = wB * wF * (sumB / wB - (sumAll - sumB) / wF) ** 2;
+    if (between > best) [best, cut] = [between, i];
+  }
+  return cut;
+}
+
+// Scales the screenshot up and returns one black on white canvas per pass.
 async function prepareImage(blob) {
   const bmp = await createImageBitmap(blob);
   const scale = Math.min(3, Math.max(1, 2400 / bmp.width));
@@ -33,56 +62,63 @@ async function prepareImage(blob) {
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(bmp, 0, 0, w, h);
   bmp.close?.();
-  const img = ctx.getImageData(0, 0, w, h);
-  const px = img.data;
-  const grey = new Uint8ClampedArray(w * h);
-  let total = 0;
-  for (let i = 0, j = 0; i < px.length; i += 4, j++) {
-    // Max channel instead of luminance keeps gold and blue UI text as bright as white text.
-    grey[j] = Math.max(px[i], px[i + 1], px[i + 2]);
-    total += grey[j];
+  const src = ctx.getImageData(0, 0, w, h).data;
+  const channels = { min: new Uint8Array(w * h), max: new Uint8Array(w * h) };
+  for (let i = 0, j = 0; i < src.length; i += 4, j++) {
+    channels.min[j] = Math.min(src[i], src[i + 1], src[i + 2]);
+    channels.max[j] = Math.max(src[i], src[i + 1], src[i + 2]);
   }
-  const invert = total / grey.length < 128;
-  const hist = new Uint32Array(256);
-  for (const g of grey) hist[invert ? 255 - g : g]++;
-  const pick = (q) => {
-    let acc = 0;
-    for (let v = 0; v < 256; v++) if ((acc += hist[v]) >= q * grey.length) return v;
-    return 255;
-  };
-  const lo = pick(0.02);
-  const hi = Math.max(lo + 1, pick(0.98));
-  for (let j = 0; j < grey.length; j++) {
-    const g = invert ? 255 - grey[j] : grey[j];
-    const v = ((g - lo) * 255) / (hi - lo);
-    px[j * 4] = px[j * 4 + 1] = px[j * 4 + 2] = v;
-  }
-  ctx.putImageData(img, 0, 0);
-  return canvas;
+  return PASSES.map(({ channel, cut }) => {
+    const grey = channels[channel];
+    if (cut === 'otsu') {
+      const hist = new Uint32Array(256);
+      for (const g of grey) hist[g]++;
+      cut = otsu(hist, grey.length);
+    }
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const octx = out.getContext('2d');
+    const img = octx.createImageData(w, h);
+    for (let j = 0; j < grey.length; j++) {
+      const v = grey[j] >= cut ? 0 : 255;
+      img.data[j * 4] = img.data[j * 4 + 1] = img.data[j * 4 + 2] = v;
+      img.data[j * 4 + 3] = 255;
+    }
+    octx.putImageData(img, 0, 0);
+    return out;
+  });
 }
 
-// Returns the words found in each image with their boxes, one array per image.
+// Returns, for each image, one array of words (with boxes and confidence) per pass.
 export async function readImages(blobs, onProgress = () => {}) {
   const T = await loadEngine();
-  let current = 0;
+  let step = '';
   const worker = await T.createWorker('eng', 1, {
     logger: (m) => {
-      if (m.status === 'recognizing text') onProgress(`Reading image ${current + 1} of ${blobs.length}… ${Math.round(m.progress * 100)}%`);
-      else if (m.status) onProgress(`${m.status[0].toUpperCase()}${m.status.slice(1)}…`);
+      if (m.status === 'recognizing text') onProgress(`${step} ${Math.round(m.progress * 100)}%`);
+      else if (m.status && !step) onProgress(`${m.status[0].toUpperCase()}${m.status.slice(1)}…`);
     },
   });
   try {
     // Sparse text: item names are scattered labels, not paragraphs.
     await worker.setParameters({ tessedit_pageseg_mode: '11' });
     const out = [];
-    for (; current < blobs.length; current++) {
-      onProgress(`Preparing image ${current + 1} of ${blobs.length}…`);
-      const { data } = await worker.recognize(await prepareImage(blobs[current]));
-      out.push(
-        (data.words ?? [])
-          .filter((w) => w.confidence >= 20 && /[a-z0-9]/i.test(w.text))
-          .map((w) => ({ text: w.text, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 })),
-      );
+    for (let i = 0; i < blobs.length; i++) {
+      step = `Preparing image ${i + 1} of ${blobs.length}…`;
+      onProgress(step);
+      const passes = [];
+      const canvases = await prepareImage(blobs[i]);
+      for (let k = 0; k < canvases.length; k++) {
+        step = `Reading image ${i + 1} of ${blobs.length}, pass ${k + 1} of ${canvases.length}…`;
+        const { data } = await worker.recognize(canvases[k]);
+        passes.push(
+          (data.words ?? [])
+            .filter((w) => w.confidence >= 20 && /[a-z0-9]/i.test(w.text))
+            .map((w) => ({ text: w.text, conf: w.confidence, x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1 })),
+        );
+      }
+      out.push(passes);
     }
     return out;
   } finally {
@@ -94,9 +130,13 @@ const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b);
   return s.length ? s[s.length >> 1] : 0;
 };
-// Stack counts read "x4" on relics and "✓ 2" on prime parts, where the tick may come back glued on as a symbol.
-const countText = (t) => t.replace(/^[^a-z0-9]+/i, '');
-const isCount = (t) => /^[x×]?\d{1,4}[x×]?$/i.test(countText(t));
+// Stack counts read "x4" on relics and "✓ 2" on prime parts, where the tick comes back as a symbol
+// such as "@2". A bare number is not trusted as a count: it is more often a relic code ("Neo 02")
+// or a stray read off an item icon.
+const countOf = (w) => {
+  const m = w.text.match(/^(?:[x×]|[@©®✓√]+)(\d{1,3})$/i);
+  return m ? Number(m[1]) : null;
+};
 
 // The relic screen lists the selected relic's possible rewards on the right, under a
 // "<relic> - Possible Rewards" title. Those are not owned items, so drop everything from that
@@ -118,15 +158,16 @@ export function dropRewardPanel(words) {
 
 // Groups words into tiles: words on one line close together, plus lines just below them that
 // are roughly centred under them (inventory names wrap onto two or three lines).
-// Lone numbers become the quantity of the nearest name below or beside them.
-// Returns [{ text, qty }] with qty null when no count was seen.
-export function groupTiles(words) {
+// Counts become the quantity of the nearest tile below or beside them that read(tile) recognises,
+// so junk read off an item icon cannot take the count. Each tile carries read(tile) as hit.
+// Returns [{ text, qty, hit, x0, y0, x1, y1 }] with qty null when no count was seen.
+export function groupTiles(words, read = () => true) {
   if (!words.length) return [];
   const h = median(words.map((w) => w.y1 - w.y0)) || 10;
   const parent = words.map((_, i) => i);
   const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   const join = (a, b) => (parent[find(a)] = find(b));
-  const counts = words.map((w) => isCount(w.text));
+  const counts = words.map((w) => countOf(w) != null);
 
   for (let i = 0; i < words.length; i++) {
     if (counts[i]) continue;
@@ -155,10 +196,18 @@ export function groupTiles(words) {
     groups.get(k).push(w);
   });
   const tiles = [...groups.values()].map((ws) => {
-    // Reading order: line by line, left to right.
-    ws.sort((a, b) => (Math.abs(a.y0 - b.y0) < 0.5 * h ? a.x0 - b.x0 : a.y0 - b.y0));
+    // Reading order: line by line, left to right. A word joins a line when its vertical centre is
+    // close to the line's, so a taller box such as "M1" stays on the line it belongs to.
+    const lines = [];
+    for (const w of [...ws].sort((a, b) => a.y0 + a.y1 - (b.y0 + b.y1))) {
+      const cy = (w.y0 + w.y1) / 2;
+      const line = lines.find((l) => Math.abs(l.cy - cy) < 0.6 * h);
+      if (line) line.words.push(w);
+      else lines.push({ cy, words: [w] });
+    }
+    const ordered = lines.flatMap((l) => l.words.sort((a, b) => a.x0 - b.x0));
     return {
-      text: ws.map((w) => w.text).join(' '),
+      text: ordered.map((w) => w.text).join(' '),
       qty: null,
       x0: Math.min(...ws.map((w) => w.x0)),
       x1: Math.max(...ws.map((w) => w.x1)),
@@ -166,6 +215,7 @@ export function groupTiles(words) {
       y1: Math.max(...ws.map((w) => w.y1)),
     };
   });
+  for (const t of tiles) t.hit = read(t) || null;
 
   words.forEach((w, i) => {
     if (!counts[i]) return;
@@ -173,21 +223,58 @@ export function groupTiles(words) {
     let best = null;
     let bestD = Infinity;
     for (const t of tiles) {
-      if (t.qty != null || t.y1 < w.y0 - h) continue; // only names below or level with the number
+      if (!t.hit || t.qty != null || t.y1 < w.y0 - h) continue; // only names below or level with the number
       const dx = cx < t.x0 ? t.x0 - cx : cx > t.x1 ? cx - t.x1 : 0;
       const dy = Math.max(0, t.y0 - w.y1);
       if (dx > 6 * h || dy > 10 * h) continue;
       const d = dx + dy;
       if (d < bestD) [best, bestD] = [t, d];
     }
-    if (best) best.qty = Number(countText(w.text).replace(/[x×]/gi, ''));
+    if (best) best.qty = countOf(w);
   });
 
-  return tiles.map(({ text, qty }) => ({ text, qty }));
+  return tiles;
+}
+
+// Combines the passes over one screenshot. read(tile) returns { key, ...item } or null.
+// All passes look at the same pixels, so tiles are matched up by position and each spot on screen
+// takes the item most passes agree on (a single pass misreading "Neo O2" as "Neo O3" is outvoted).
+// The quantity is the count most of those passes saw, 1 when none saw one.
+// Text no pass could match, at a spot where no item was found, comes back as unread.
+export function combinePasses(passes, read) {
+  const spots = [];
+  const unread = [];
+  passes.forEach((words, k) => {
+    for (const tile of groupTiles(dropRewardPanel(words), read)) {
+      if (!tile.hit) {
+        if (k === 0) unread.push(tile);
+        continue;
+      }
+      const cx = (tile.x0 + tile.x1) / 2;
+      const cy = (tile.y0 + tile.y1) / 2;
+      let spot = spots.find((s) => cx > s.x0 && cx < s.x1 && cy > s.y0 && cy < s.y1);
+      if (!spot) spots.push((spot = { x0: tile.x0, y0: tile.y0, x1: tile.x1, y1: tile.y1, reads: [] }));
+      spot.reads.push({ ...tile.hit, qty: tile.qty, read: tile.text });
+    }
+  });
+  const items = new Map();
+  for (const { reads } of spots) {
+    const tally = (xs) => {
+      const m = new Map();
+      for (const x of xs) if (x != null) m.set(x, (m.get(x) ?? 0) + 1);
+      return [...m].sort((a, b) => b[1] - a[1])[0]?.[0];
+    };
+    const key = tally(reads.map((r) => r.key));
+    const mine = reads.filter((r) => r.key === key);
+    const item = { ...mine[0], qty: tally(mine.map((r) => r.qty)) ?? 1 };
+    if (!items.has(key) || items.get(key).qty < item.qty) items.set(key, item);
+  }
+  const inSpot = (t) => spots.some((s) => t.x0 < s.x1 && t.x1 > s.x0 && t.y0 < s.y1 && t.y1 > s.y0);
+  return { items: [...items.values()], unread: [...new Set(unread.filter((t) => !inSpot(t)).map((t) => t.text))] };
 }
 
 // Characters OCR mixes up in this font cost less to swap, so "LITH 61" lands on "Lith G1".
-const CONFUSED = new Set(['0o', '1i', '1l', 'il', '5s', '8b', '6g', '2z', 'cg', 'uv', 'nm', 'ec', 'ao'].flatMap((p) => [p, p[1] + p[0]]));
+const CONFUSED = new Set(['0o', '1i', '1l', 'il', '5s', '8b', '6g', '2z', 'cg', 'uv', 'nm', 'ec', 'ao', '1t', '1j'].flatMap((p) => [p, p[1] + p[0]]));
 const subCost = (a, b) => (a === b ? 0 : CONFUSED.has(a + b) ? 0.3 : 1);
 
 function distance(a, b, limit) {
