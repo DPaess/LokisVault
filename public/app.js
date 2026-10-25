@@ -260,6 +260,7 @@ function relicCard(name, need) {
             data-change="relic-count" data-relic="${esc(name)}" data-ref="${r}" data-focus="relic:${esc(name)}:${r}"></label>`,
         ).join('')}
       </div>
+      ${ref !== 'intact' ? `<div class="small muted" style="margin-top:8px" title="Drop chances below are for the best refinement you own"><span class="badge void">${REF_LABEL[ref]} chances</span></div>` : ''}
       <div class="rewards">${relic.rewards.map((w) => rewardLine(w, ref, need)).join('')}</div>
       <table class="refine">
         <tr><th></th><th>Intact</th><th>Radiant</th><th title="What refining adds per 100 Void Traces">+ per 100 traces</th></tr>
@@ -271,7 +272,6 @@ function relicCard(name, need) {
           })
           .join('')}
       </table>
-      <div class="small muted">Drop chances above are for ${REF_LABEL[ref].toLowerCase()}, the best refinement you own.</div>
     </article>`;
 }
 
