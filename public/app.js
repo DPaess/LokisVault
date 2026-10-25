@@ -2,7 +2,7 @@
 // Game data comes from data/items.json and data/prices.json (built by scripts/).
 // The player's inventory lives in localStorage under STORE_KEY.
 
-import { readImages, groupTiles, createFuzzy } from './ocr.js';
+import { readImages, groupTiles, dropRewardPanel, createFuzzy } from './ocr.js';
 
 const STORE_KEY = 'lokisvault:v1';
 const REFS = ['intact', 'exceptional', 'flawless', 'radiant'];
@@ -808,7 +808,7 @@ async function runShots(files) {
     const rows = new Map(sh.rows.map((r) => [shotRowKey(r), r]));
     const unread = new Set(sh.unread);
     for (const words of pages) {
-      for (const tile of groupTiles(words)) {
+      for (const tile of groupTiles(dropRewardPanel(words))) {
         const hit = readTile(tile);
         if (!hit) {
           if (/[a-z]{3}.*[a-z]{3}/i.test(tile.text)) unread.add(tile.text);

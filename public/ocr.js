@@ -94,7 +94,27 @@ const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b);
   return s.length ? s[s.length >> 1] : 0;
 };
-const isCount = (t) => /^[x×]?\d{1,4}[x×]?$/i.test(t);
+// Stack counts read "x4" on relics and "✓ 2" on prime parts, where the tick may come back glued on as a symbol.
+const countText = (t) => t.replace(/^[^a-z0-9]+/i, '');
+const isCount = (t) => /^[x×]?\d{1,4}[x×]?$/i.test(countText(t));
+
+// The relic screen lists the selected relic's possible rewards on the right, under a
+// "<relic> - Possible Rewards" title. Those are not owned items, so drop everything from that
+// title's left edge rightwards.
+export function dropRewardPanel(words) {
+  const title = words.find((w) => /^(possible|rewards?)$/i.test(w.text));
+  if (!title) return words;
+  const h = title.y1 - title.y0;
+  const sameLine = words
+    .filter((w) => Math.min(w.y1, title.y1) - Math.max(w.y0, title.y0) > 0.5 * h && w.x1 <= title.x0)
+    .sort((a, b) => b.x1 - a.x1);
+  let edge = title.x0;
+  for (const w of sameLine) {
+    if (edge - w.x1 > 3 * h) break;
+    edge = w.x0;
+  }
+  return words.filter((w) => w.x0 < edge - 0.5 * h);
+}
 
 // Groups words into tiles: words on one line close together, plus lines just below them that
 // are roughly centred under them (inventory names wrap onto two or three lines).
@@ -160,7 +180,7 @@ export function groupTiles(words) {
       const d = dx + dy;
       if (d < bestD) [best, bestD] = [t, d];
     }
-    if (best) best.qty = Number(w.text.replace(/[x×]/gi, ''));
+    if (best) best.qty = Number(countText(w.text).replace(/[x×]/gi, ''));
   });
 
   return tiles.map(({ text, qty }) => ({ text, qty }));
@@ -203,7 +223,7 @@ export function createFuzzy(keys) {
         [best, bestD] = [value, d];
       } else if (d < runnerD && value !== best) runnerD = d;
     }
-    if (bestD > limit || runnerD - bestD < 0.5) return null;
+    if (bestD > 0 && (bestD > limit || runnerD - bestD < 0.5)) return null;
     return best;
   };
 }
