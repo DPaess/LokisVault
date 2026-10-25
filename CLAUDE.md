@@ -105,7 +105,7 @@ Keys are our names, plus ` Set` for sets and ` Relic` for relics (intact price).
 
 ## The web app to build (`public/app.js`)
 
-Vanilla JS ES module, no framework, no build step. Hash routing on the tabs already in `index.html` (`#overview`, `#relics`, `#parts`, `#wishlist`, `#mastery`, `#trade`, `#data`). Render into `<main id="view">` with template strings, always HTML escape names, use event delegation. Fill the three `<datalist>`s (`dl-relics`, `dl-parts`, `dl-sets`) for autocomplete. Fill `#sources` in the footer with the data and price timestamps. CSS classes already exist in `style.css` (`.panel`, `.grid.stats`, `.stat`, `.bar`, `.toolbar`, `.table-wrap`, `.badge.farm|vault|gold|void`, `.verdict.sell|ducat|hold`, `.card`, `.counts`, `.rewards`, `.reward.common|uncommon|rare|want`, `.part-line`, `.empty`, `.note`, `.toast`), reuse them.
+Vanilla JS ES module, no framework, no build step. Hash routing on the tabs already in `index.html` (`#relics`, `#parts`, `#wishlist`, `#mastery`, `#trade`, `#data`; the site opens on `#wishlist`). Render into `<main id="view">` with template strings, always HTML escape names, use event delegation. Fill the three `<datalist>`s (`dl-relics`, `dl-parts`, `dl-sets`) for autocomplete. Fill `#sources` in the footer with the data and price timestamps. CSS classes already exist in `style.css` (`.panel`, `.grid.stats`, `.stat`, `.bar`, `.toolbar`, `.table-wrap`, `.badge.farm|vault|gold|void`, `.verdict.sell|ducat|hold`, `.card`, `.counts`, `.rewards`, `.reward.common|uncommon|rare|want`, `.part-line`, `.empty`, `.note`, `.toast`), reuse them.
 
 ### State (localStorage key `lokisvault:v1`)
 
@@ -131,7 +131,7 @@ Derived "need" for a part = sum over wishlist sets of `part.count`. "Missing" = 
 
 ### Tabs
 
-1. **Overview**: stat tiles for mastery progress (points and items, with `.bar`), wishlist sets completed vs total and missing part count, relics owned (total count, how many contain wanted parts), spare parts total value in plat (sum of `priceOf × spare`) and in ducats. A short "next steps" list: top 5 owned relics by number of wanted parts, and wanted parts you have no relic for.
+1. ~~Overview~~: removed on 2026-10-25 at Danilo's request (he did not use it; its numbers live in the other tabs).
 2. **Relics**: input with `list="dl-relics"` plus Add button. One `.card` per owned relic: name, era, badge "Dropping now" (`.farm`) or "Vaulted" (`.vault`), four number inputs for the refinements, rewards list colored by rarity showing chance for the best refinement owned and the price (`p`) and ducats, rewards needed for the wishlist highlighted with `.want`. Show expected value per opening (sum of chance × price) for intact and radiant, plat and ducats. Toolbar: filter (all, has wanted parts, vaulted only), sort (EV, name, count). Remove button on each card.
 3. **Prime parts**: input with `list="dl-parts"` and quantity, Add. Table of owned parts: name, set(s), owned (editable number), needed for wishlist, ducats, price. Group or sort by set. Show sets you can build right now from owned parts.
 4. **Wishlist**: input with `list="dl-sets"`, Add. One card per set: completion bar, set market price, each part as a `.part-line` with have/need and, when missing, where to get it:

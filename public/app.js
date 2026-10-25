@@ -194,91 +194,6 @@ const head = (title, text) => `<div class="head"><div><h2>${esc(title)}</h2>${te
 const stat = (label, value, sub = '', extra = '') =>
   `<div class="stat"><div class="label">${esc(label)}</div><div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}${extra}</div>`;
 
-VIEWS.overview = () => {
-  const need = needs();
-  const items = masteryItems();
-  const done = items.filter((m) => state.mastered[m.id]);
-  const totalXp = masteryXp(items);
-  const doneXp = masteryXp(done);
-
-  const setsDone = state.wishlist.filter(setComplete).length;
-  const missingParts = sum(Object.keys(need).map((p) => missingOf(need, p)));
-
-  const ownedRelics = Object.keys(state.relics);
-  const usefulRelic = (r) => DATA.relics[r].rewards.filter((w) => missingOf(need, w.item) > 0).length;
-  const relicCount = sum(ownedRelics.map(relicTotal));
-  const useful = ownedRelics.filter((r) => usefulRelic(r) > 0);
-
-  const spares = Object.keys(state.parts).map((p) => ({ p, n: spareOf(need, p) })).filter((x) => x.n > 0);
-  const spareP = sum(spares.map(({ p, n }) => (priceOf(p) ?? 0) * n));
-  const spareD = sum(spares.map(({ p, n }) => (DATA.parts[p]?.ducats ?? 0) * n));
-
-  const topRelics = useful
-    .map((r) => ({ r, n: usefulRelic(r) }))
-    .sort((a, b) => b.n - a.n || relicTotal(b.r) - relicTotal(a.r));
-  const noSource = Object.keys(need).filter(
-    (p) => missingOf(need, p) > 0 && !(DATA.parts[p]?.relics ?? []).some((r) => relicTotal(r) > 0),
-  );
-
-  const empty = !ownedRelics.length && !Object.keys(state.parts).length && !state.wishlist.length && !done.length;
-  return `
-    ${head('Overview', 'Everything you entered by hand, at a glance. Nothing here ever touches the game.')}
-    ${empty ? `<div class="note">Your vault is empty. Start in <a href="#mastery">Mastery</a> to tick off what you already have, add sets you want in <a href="#wishlist">Wishlist</a>, or paste a list of relics and parts in <a href="#data">Data</a>.</div>` : ''}
-    <div class="grid stats">
-      ${stat('Mastery', fmtNum(doneXp), `of ${fmtNum(totalXp)} points, ${fmtNum(totalXp - doneXp)} left`, bar(doneXp, totalXp))}
-      ${stat('Items mastered', `${done.length}`, `of ${items.length} tracked items`, bar(done.length, items.length))}
-      ${stat('Wishlist', `${setsDone} / ${state.wishlist.length}`, `sets ready to build, ${missingParts} parts missing`, bar(setsDone, state.wishlist.length))}
-      ${stat('Relics', fmtNum(relicCount), `${ownedRelics.length} kinds, ${useful.length} with parts you still need`)}
-      ${stat('Spare parts', fmtP(spareP), `${fmtD(spareD)} if traded to Baro`)}
-    </div>
-    <div class="panel" style="margin-top:14px">
-      <h3>Next steps</h3>
-      ${
-        topRelics.length
-          ? `<p class="muted small">Your relics with the most parts you still need. Crack these first. Click one to see what it drops, your wishlist parts are in blue.</p>
-             ${showMore(
-               topRelics.map(
-                 ({ r, n }) => `<details class="expand">
-                   <summary class="reward"><span><b>${esc(r)}</b> <span class="muted">${countsShort(r)}</span> ${relicBadge(r)}</span><span class="meta">${n} needed part${n > 1 ? 's' : ''}</span></summary>
-                   <div class="rewards">${DATA.relics[r].rewards.map((w) => rewardLine(w, bestRef(r), need)).join('')}</div>
-                   <div class="small muted">Chances for ${REF_LABEL[bestRef(r)].toLowerCase()}. <a href="#relics">Open Relics</a></div>
-                 </details>`,
-               ),
-               5,
-             )}`
-          : `<p class="muted">No owned relic contains a part your wishlist still needs.</p>`
-      }
-      ${
-        noSource.length
-          ? `<p class="muted small" style="margin-top:14px">Needed parts you own no relic for. Click one to see where to farm or buy it.</p>
-             ${showMore(
-               noSource.map(
-                 (p) => `<details class="expand">
-                   <summary class="reward"><span>${esc(p)} <span class="muted small">${esc(partSets(p).join(', '))}</span></span><span class="meta">${DATA.parts[p]?.built ? '<span class="badge gold">Build</span>' : DATA.parts[p]?.farmable ? '<span class="badge farm">Farmable</span>' : '<span class="badge vault">Vaulted</span>'}</span></summary>
-                   <div class="where small">${whereToGet(p)}</div>
-                 </details>`,
-               ),
-               8,
-             )}`
-          : ''
-      }
-    </div>`;
-};
-
-// A list that shows its first `first` items and reveals the rest in place, so open items stay open.
-function showMore(items, first) {
-  if (items.length <= first) return `<div class="rewards">${items.join('')}</div>`;
-  return `<div class="rewards" data-more>
-      ${items.map((it, i) => (i < first ? it : `<div class="extra">${it}</div>`)).join('')}
-      <button class="small ghost" data-action="more" data-n="${items.length - first}">Show ${items.length - first} more</button>
-    </div>`;
-}
-ACTIONS.more = (el) => {
-  const box = el.closest('[data-more]');
-  const all = box.classList.toggle('show-all');
-  el.textContent = all ? 'Show fewer' : `Show ${el.dataset.n} more`;
-};
-
 // Long pages render a first batch and grow on demand, instead of drawing hundreds of rows at once.
 // The count resets whenever that page's filters change (filters is any JSON-able value).
 const PAGE_SIZE = { relics: 24, parts: 50, wishlist: 12, mastery: 60, trade: 50 };
@@ -1783,7 +1698,7 @@ document.addEventListener('visibilitychange', () => {
 
 const currentTab = () => {
   const t = location.hash.slice(1);
-  return VIEWS[t] ? t : 'overview';
+  return VIEWS[t] ? t : 'wishlist';
 };
 
 // Re-rendering replaces the DOM, so remember which field had focus (by data-focus) and restore it.

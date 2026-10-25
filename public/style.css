@@ -195,15 +195,6 @@ tr.dim td { opacity: 0.55; }
 .drop.over { border-color: var(--gold); background: var(--gold-soft); }
 .table-wrap input[list] { width: 100%; min-width: 180px; }
 
-details.expand > summary { list-style: none; cursor: pointer; }
-details.expand > summary::-webkit-details-marker { display: none; }
-details.expand > summary > span:first-child::before { content: '▸'; display: inline-block; width: 1em; color: var(--muted); transition: transform 0.15s; }
-details.expand[open] > summary > span:first-child::before { transform: rotate(90deg); }
-details.expand[open] > summary { outline: 1px solid var(--gold); }
-details.expand > .rewards, details.expand > .where, details.expand > .small { margin: 6px 0 10px 1em; }
-details.expand .where b { color: var(--text); font-weight: 500; }
-[data-more]:not(.show-all) > .extra { display: none; }
-[data-more] > button { justify-self: start; }
 .warn { color: var(--warn); }
 .badge.check { color: var(--warn); background: rgba(240, 180, 90, 0.14); margin-left: 4px; }
 .toast button { margin-left: 10px; }

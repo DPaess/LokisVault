@@ -10,7 +10,6 @@ I play Warframe through GeForce Now. The game runs in the cloud, so tools like A
 
 ## Features
 
-* **Overview**: mastery progress, wishlist completion, relic count, the value of your spare parts in plat and ducats, and next steps: which relics to crack (click one to see its drops with your wishlist parts highlighted) and which needed parts you have no relic for (click one to see where to farm or buy it).
 * **Relics**: your relics by refinement (intact, exceptional, flawless, radiant), their rewards with drop chance, price and ducats, parts you still need highlighted, and the expected value of one opening. Relics are tagged as dropping now or vaulted, and can be filtered by type (Lith, Meso, Neo, Axi, Requiem).
 * **Prime parts**: the parts you own, how many your wishlist needs, and which sets you can build right now.
 * **Wishlist**: prime sets you want. Each missing part shows which of your relics drop it, which relics you can farm today, or a warframe.market link when every source is vaulted. Mark a set as built to use up its parts and mark it mastered. Search, filter (category, ready or missing parts, vaulted, missing parts in my relics) and sort (closest to done, fewest missing, set price).
