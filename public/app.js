@@ -326,13 +326,16 @@ function relicCard(name, need) {
 
 // Owned relics passing the Relics tab filters, unsorted.
 function relicsShown(need = needs()) {
-  const f = (ui.relics ??= { filter: 'all', era: '', sort: 'ev' });
+  const f = (ui.relics ??= { q: '', filter: 'all', era: '', sort: 'ev' });
+  const q = norm(f.q);
   const hasWanted = (r) => DATA.relics[r].rewards.some((w) => missingOf(need, w.item) > 0);
   let names = Object.keys(state.relics);
   if (f.filter === 'wanted') names = names.filter(hasWanted);
   if (f.filter === 'vaulted') names = names.filter((r) => !DATA.relics[r].farmable);
   if (f.era && !Object.keys(state.relics).some((r) => DATA.relics[r].era === f.era)) f.era = '';
   if (f.era) names = names.filter((r) => DATA.relics[r].era === f.era);
+  // Search matches the relic's name or anything it drops ("loki" finds relics with Loki Prime parts).
+  if (q) names = names.filter((r) => norm(r).includes(q) || DATA.relics[r].rewards.some((w) => norm(w.item).includes(q)));
   return names;
 }
 
@@ -360,6 +363,7 @@ VIEWS.relics = () => {
       <button class="primary">Add</button>
     </form>
     <div class="toolbar">
+      <input class="grow" type="search" placeholder="Search relics or what they drop" value="${esc(f.q ?? '')}" data-input="relic-q" data-focus="relic-q">
       <select data-change="relic-filter" aria-label="Filter">
         ${[['all', 'All relics'], ['wanted', 'Has parts I need'], ['vaulted', 'Vaulted only']].map(([v, l]) => `<option value="${v}"${f.filter === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select>
@@ -400,10 +404,14 @@ CHANGES['relic-count'] = (el) => {
   else save(`Removed ${el.dataset.relic}`, true);
   render();
 };
+INPUTS['relic-q'] = (el) => {
+  ui.relics.q = el.value;
+  render();
+};
 ACTIONS['relics-remove-shown'] = () => {
   const names = relicsShown();
   const f = ui.relics;
-  const what = f.era || f.filter !== 'all' ? `the ${names.length} relics matching your filters` : `all ${names.length} relics`;
+  const what = f.q || f.era || f.filter !== 'all' ? `the ${names.length} relics matching your filters` : `all ${names.length} relics`;
   if (!names.length || !confirm(`Remove ${what} from your vault? You can undo this.`)) return;
   checkpoint();
   for (const r of names) delete state.relics[r];
@@ -450,10 +458,12 @@ const partSortKey = (p) => `${partSets(p)[0] ?? '~'}|${p}`;
 // A part's type is the category of its set (Warframe, Primary, Melee...).
 const partType = (p) => DATA.sets[partSets(p)[0]]?.category ?? 'Other';
 function partsShown() {
-  const f = (ui.parts ??= { type: '' });
+  const f = (ui.parts ??= { q: '', type: '' });
+  const q = norm(f.q);
   const all = Object.keys(state.parts);
   if (f.type && !all.some((p) => partType(p) === f.type)) f.type = '';
-  return all.filter((p) => !f.type || partType(p) === f.type).sort((a, b) => partSortKey(a).localeCompare(partSortKey(b)));
+  return all
+    .filter((p) => (!f.type || partType(p) === f.type) && (!q || norm(p).includes(q) || partSets(p).some((s) => norm(s).includes(q)))).sort((a, b) => partSortKey(a).localeCompare(partSortKey(b)));
 }
 
 VIEWS.parts = () => {
@@ -486,6 +496,7 @@ VIEWS.parts = () => {
     ${
       total
         ? `<div class="toolbar">
+             <input class="grow" type="search" placeholder="Search your parts or sets" value="${esc(f.q ?? '')}" data-input="parts-q" data-focus="parts-q">
              <select data-change="parts-type" aria-label="Type"><option value="">All types</option>${types
                .map((t) => `<option value="${esc(t)}"${f.type === t ? ' selected' : ''}>${esc(t)} (${Object.keys(state.parts).filter((p) => partType(p) === t).length})</option>`)
                .join('')}</select>
@@ -530,13 +541,17 @@ CHANGES['part-count'] = (el) => {
   else save(`Removed ${el.dataset.part}`, true);
   render();
 };
+INPUTS['parts-q'] = (el) => {
+  ui.parts.q = el.value;
+  render();
+};
 CHANGES['parts-type'] = (el) => {
   ui.parts.type = el.value;
   render();
 };
 ACTIONS['parts-remove-shown'] = () => {
   const names = partsShown();
-  const what = ui.parts.type ? `the ${names.length} ${ui.parts.type} part kinds` : `all ${names.length} part kinds`;
+  const what = ui.parts.q || ui.parts.type ? `the ${names.length} part kinds matching your filters` : `all ${names.length} part kinds`;
   if (!names.length || !confirm(`Remove ${what} from your vault? You can undo this.`)) return;
   checkpoint();
   for (const p of names) delete state.parts[p];
