@@ -8,6 +8,7 @@ Read this whole file before doing anything. It is the spec and the status of the
 * The owner (Danilo, GitHub `DPaess`, in game nick `Z.e.r.0`, favourite frame Loki) may write in Portuguese or English. Answer in English. Tell him what you are doing as you go.
 * Work in small steps and commit after each one (Conventional Commits, e.g. `feat(relics): ...`). Claude co-author trailers are fine.
 * When writing prose to Danilo, never use dashes or hyphens as punctuation and never use semicolons. Prefer flowing prose over short fragmented sentences.
+* **Digital Extremes terms come first.** Before building any feature, check it against DE's EULA and Terms of Use and tell Danilo the verdict before writing code. Never build anything that reads game memory, sniffs or alters network traffic, injects into or automates the game client, uses his account credentials or tokens against DE's servers, automates trading, or redistributes DE art and icons, even if asked. Explain why and offer a compliant alternative instead.
 * Public repo, MIT license. Fan project, no Digital Extremes logos or official art. Keep the footer disclaimer.
 
 ## What this is and why
