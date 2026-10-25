@@ -890,7 +890,6 @@ VIEWS.trade = () => {
     ducats: (a, b) => a.ducats - b.ducats,
     ratio: (a, b) => (a.v.ratio ?? -1) - (b.v.ratio ?? -1),
     verdict: (a, b) => order[a.v.key] - order[b.v.key] || (b.price ?? 0) * b.n - (a.price ?? 0) * a.n,
-    stack: (a, b) => (a.price ?? 0) * a.n - (b.price ?? 0) * b.n,
   };
   const sign = f.dir === 'desc' ? -1 : 1;
   rows.sort((a, b) => sign * (sorters[f.sort] ?? sorters.verdict)(a, b) || a.p.localeCompare(b.p));
@@ -923,7 +922,7 @@ VIEWS.trade = () => {
     ${
       rows.length
         ? `<div class="table-wrap"><table>
-            <thead><tr>${th('part', 'Part')}${th('spare', 'Spare', 'num')}${th('price', 'Price', 'num')}${th('buy', 'Instant sell', 'num')}${th('ducats', 'Ducats', 'num')}${th('ratio', 'D / p', 'num')}${th('verdict', 'Verdict')}${th('stack', 'Stack', 'num')}<th></th></tr></thead>
+            <thead><tr>${th('part', 'Part')}${th('spare', 'Spare', 'num')}${th('price', 'Price', 'num')}${th('buy', 'Instant sell', 'num')}${th('ducats', 'Ducats', 'num')}${th('ratio', 'D / p', 'num')}${th('verdict', 'Verdict')}<th></th></tr></thead>
             <tbody>${pg.items
               .map(
                 (r) => `<tr>
@@ -934,7 +933,6 @@ VIEWS.trade = () => {
                   <td class="num">${fmtD(r.ducats)}</td>
                   <td class="num">${r.v.ratio == null ? '–' : fmtNum(r.v.ratio, 1)}</td>
                   <td><span class="verdict ${r.v.key}">${r.v.label}</span></td>
-                  <td class="num">${r.v.key === 'ducat' ? fmtD(r.ducats * r.n) : fmtP(r.price == null ? null : r.price * r.n)}</td>
                   <td>${sellLink(r.p)}</td>
                 </tr>`,
               )
