@@ -865,15 +865,34 @@ function spareSets(need) {
 
 VIEWS.trade = () => {
   const need = needs();
-  const rows = Object.keys(state.parts)
+  const f = (ui.trade ??= { q: '', verdict: '', type: '', sort: 'verdict' });
+  const q = norm(f.q);
+  const spares = Object.keys(state.parts)
     .map((p) => ({ p, n: spareOf(need, p), price: priceOf(p), buy: priceEntry(p)?.buy ?? null, ducats: DATA.parts[p]?.ducats ?? 0, v: verdictFor(p) }))
     .filter((r) => r.n > 0);
+  const rows = spares.filter(
+    (r) =>
+      (!q || norm(r.p).includes(q) || partSets(r.p).some((s) => norm(s).includes(q))) &&
+      (!f.verdict || r.v.key === f.verdict) &&
+      (!f.type || partType(r.p) === f.type),
+  );
   const order = { sell: 0, ducat: 1, hold: 2 };
-  rows.sort((a, b) => order[a.v.key] - order[b.v.key] || (b.price ?? 0) * b.n - (a.price ?? 0) * a.n || a.p.localeCompare(b.p));
+  const sorters = {
+    verdict: (a, b) => order[a.v.key] - order[b.v.key] || (b.price ?? 0) * b.n - (a.price ?? 0) * a.n,
+    stack: (a, b) => (b.price ?? 0) * b.n - (a.price ?? 0) * a.n,
+    price: (a, b) => (b.price ?? -1) - (a.price ?? -1),
+    ratio: (a, b) => (b.v.ratio ?? -1) - (a.v.ratio ?? -1),
+    spare: (a, b) => b.n - a.n,
+    name: () => 0,
+  };
+  rows.sort((a, b) => (sorters[f.sort] ?? sorters.verdict)(a, b) || a.p.localeCompare(b.p));
+  const filtered = rows.length !== spares.length;
   const sellPile = rows.filter((r) => r.v.key === 'sell');
   const ducatPile = rows.filter((r) => r.v.key === 'ducat');
   const sets = spareSets(need);
-  const pg = page('trade', rows);
+  const pg = page('trade', rows, f);
+  const types = [...new Set(spares.map((r) => partType(r.p)))].sort();
+  const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
 
   return `
     ${head('Sell or ducat', 'Spare parts are the ones you own beyond what your wishlist needs. Prices are the median of the five cheapest sellers online on warframe.market, refreshed daily.')}
@@ -882,6 +901,17 @@ VIEWS.trade = () => {
         <input type="number" min="1" step="1" value="${state.settings.ducatRatio}" data-change="ratio" data-focus="ratio" aria-label="Ducats per plat"> ducats</label>
       <p class="small muted" style="margin:6px 0 0">A part that sells for 5p and gives 100 ducats returns 20 ducats per plat, so it goes to Baro at a threshold of 10. Lower the number to send more to Baro.</p>
     </div>
+    ${
+      spares.length
+        ? `<div class="toolbar">
+             <input class="grow" type="search" placeholder="Search spare parts or sets" value="${esc(f.q)}" data-input="trade-q" data-focus="trade-q">
+             <select data-change="trade-filter" data-key="verdict" aria-label="Verdict">${opt('', 'Any verdict', f.verdict)}${opt('sell', 'Sell', f.verdict)}${opt('ducat', 'Ducats', f.verdict)}${opt('hold', 'Hold (no price)', f.verdict)}</select>
+             <select data-change="trade-filter" data-key="type" aria-label="Type">${opt('', 'All types', f.type)}${types.map((t) => opt(t, t, f.type)).join('')}</select>
+             <select data-change="trade-filter" data-key="sort" aria-label="Sort">${opt('verdict', 'Sort by verdict', f.sort)}${opt('stack', 'Stack value', f.sort)}${opt('price', 'Price', f.sort)}${opt('ratio', 'Ducats per plat', f.sort)}${opt('spare', 'Spare count', f.sort)}${opt('name', 'Name', f.sort)}</select>
+             <span class="muted small">${rows.length} of ${spares.length} shown</span>
+           </div>`
+        : ''
+    }
     ${
       rows.length
         ? `<div class="table-wrap"><table>
@@ -904,10 +934,12 @@ VIEWS.trade = () => {
           </table></div>
           ${pg.more}
           <div class="grid stats" style="margin-top:14px">
-            ${stat('Sell pile', fmtP(sum(sellPile.map((r) => r.price * r.n))), `${sum(sellPile.map((r) => r.n))} parts`)}
-            ${stat('Ducat pile', fmtD(sum(ducatPile.map((r) => r.ducats * r.n))), `${sum(ducatPile.map((r) => r.n))} parts for Baro Ki'Teer`)}
+            ${stat(filtered ? 'Sell pile (shown)' : 'Sell pile', fmtP(sum(sellPile.map((r) => r.price * r.n))), `${sum(sellPile.map((r) => r.n))} parts`)}
+            ${stat(filtered ? 'Ducat pile (shown)' : 'Ducat pile', fmtD(sum(ducatPile.map((r) => r.ducats * r.n))), `${sum(ducatPile.map((r) => r.n))} parts for Baro Ki'Teer`)}
           </div>`
-        : '<div class="empty">No spare parts. Everything you own is needed by your wishlist, or you have not added parts yet.</div>'
+        : spares.length
+          ? '<div class="empty">No spare part matches these filters.</div>'
+          : '<div class="empty">No spare parts. Everything you own is needed by your wishlist, or you have not added parts yet.</div>'
     }
     ${
       sets.length
@@ -920,6 +952,14 @@ VIEWS.trade = () => {
     }`;
 };
 
+INPUTS['trade-q'] = (el) => {
+  ui.trade.q = el.value;
+  render();
+};
+CHANGES['trade-filter'] = (el) => {
+  ui.trade[el.dataset.key] = el.value;
+  render();
+};
 CHANGES.ratio = (el) => {
   const v = Number(el.value);
   if (v > 0) state.settings.ducatRatio = v;
