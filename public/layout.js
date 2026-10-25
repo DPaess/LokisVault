@@ -198,17 +198,15 @@ export function lightIn(v, w, { x0, y0, x1, y1 }) {
   return all ? lit / all : 0;
 }
 
-// Cuts a region out as black text on white, scaled up for the reader. Text is whatever the minority
-// side of the region's own best split is, which works for light names on dark tiles and for the
-// dark labels on light bands alike. Uses the darkest colour channel so gold icon edges fall away.
-// rgba: the full screenshot (4 bytes per pixel). Returns { width, height, data } as RGBA.
-export function textCrop(rgba, w, h, reg, scale = 3) {
+// Which pixels of a region are text. Text is whatever the minority side of the region's own best
+// split is, which works for light names on dark tiles and for the dark labels on light bands
+// alike. Uses the darkest colour channel so gold icon edges fall away.
+// rgba: the full screenshot (4 bytes per pixel). Returns { x0, y0, cw, ch, mask } in that image.
+export function textMask(rgba, w, h, reg) {
   const x0 = Math.max(0, reg.x0);
   const y0 = Math.max(0, reg.y0);
-  const x1 = Math.min(w, reg.x1);
-  const y1 = Math.min(h, reg.y1);
-  const cw = x1 - x0;
-  const ch = y1 - y0;
+  const cw = Math.min(w, reg.x1) - x0;
+  const ch = Math.min(h, reg.y1) - y0;
   const g = new Uint8Array(cw * ch);
   const hist = new Uint32Array(256);
   for (let y = 0; y < ch; y++)
@@ -236,16 +234,121 @@ export function textCrop(rgba, w, h, reg, scale = 3) {
   let above = 0;
   for (const p of g) if (p > cut) above++;
   const lightText = above <= g.length / 2;
+  const mask = new Uint8Array(cw * ch);
+  for (let i = 0; i < g.length; i++) mask[i] = (lightText ? g[i] > cut : g[i] <= cut) ? 1 : 0;
+  return { x0, y0, cw, ch, mask };
+}
+
+// Cuts a region out as black text on white, scaled up for a reader. Returns RGBA image data.
+export function textCrop(rgba, w, h, reg, scale = 3) {
+  const { cw, ch, mask } = textMask(rgba, w, h, reg);
   const W = cw * scale;
   const H = ch * scale;
   const data = new Uint8ClampedArray(W * H * 4);
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
-      const p = g[Math.floor(y / scale) * cw + Math.floor(x / scale)];
-      const text = lightText ? p > cut : p <= cut;
+      const v = mask[Math.floor(y / scale) * cw + Math.floor(x / scale)] ? 0 : 255;
       const o = (y * W + x) * 4;
-      data[o] = data[o + 1] = data[o + 2] = text ? 0 : 255;
+      data[o] = data[o + 1] = data[o + 2] = v;
       data[o + 3] = 255;
     }
   return { width: W, height: H, data };
+}
+
+// The text lines inside a region, as boxes in the screenshot, top to bottom. Single line readers
+// (such as PaddleOCR's recognition model) read each of these on its own.
+// lineH: the expected height of one line of text. A band much taller than that is an icon touching
+// the name: lines are cut off its bottom (at the faintest row above each line), at most two, and
+// the rest is dropped.
+export function textLines(rgba, w, h, reg, lineH = 0) {
+  // Labels printed on a light band (mastered items on Profile → Equipment): read inside the band
+  // only, so the art behind the tile cannot mix in.
+  const band = lightBand(rgba, w, h, reg, lineH);
+  if (band) reg = band;
+  const { x0, y0, cw, ch, mask } = textMask(rgba, w, h, reg);
+  const rowInk = new Uint16Array(ch);
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) rowInk[y] += mask[y * cw + x];
+  const minInk = Math.max(2, cw * 0.012);
+  const bands = [];
+  for (let y = 0; y < ch; ) {
+    if (rowInk[y] < minInk) {
+      y++;
+      continue;
+    }
+    let end = y;
+    // Allow a pixel or two of gap inside a line (thin strokes, the dot of an i).
+    while (end < ch && (rowInk[end] >= minInk || (end + 2 < ch && (rowInk[end + 1] >= minInk || rowInk[end + 2] >= minInk)))) end++;
+    if (end - y >= 6) {
+      // First split where the ink nearly vanishes (between stacked lines, even when descenders
+      // almost touch the next line), then cut lines off the bottom of anything still too tall.
+      let peak = 0;
+      for (let r = y; r < end; r++) peak = Math.max(peak, rowInk[r]);
+      const pieces = [];
+      for (let r = y; r < end; ) {
+        if (rowInk[r] < peak * 0.12) {
+          r++;
+          continue;
+        }
+        let e = r;
+        while (e < end && rowInk[e] >= peak * 0.12) e++;
+        if (e - r >= 6) pieces.push([r, e]);
+        r = e;
+      }
+      for (const [py, pe] of pieces) {
+        if (lineH && pe - py > 1.5 * lineH) {
+          let bottom = pe;
+          for (let k = 0; k < 3 && bottom - py > 1.5 * lineH; k++) {
+            let split = bottom - Math.round(lineH);
+            for (let r = bottom - Math.round(1.6 * lineH); r <= bottom - Math.round(0.75 * lineH); r++)
+              if (r > py && rowInk[r] <= rowInk[split]) split = r;
+            bands.push([split, bottom]);
+            bottom = split;
+          }
+        } else bands.push([py, pe]);
+      }
+    }
+    y = end + 1;
+  }
+  bands.sort((a, b) => a[0] - b[0]);
+  return bands.map(([a, b]) => {
+    let left = cw;
+    let right = 0;
+    for (let y = a; y < b; y++)
+      for (let x = 0; x < cw; x++)
+        if (mask[y * cw + x]) {
+          if (x < left) left = x;
+          if (x > right) right = x;
+        }
+    const pad = 4;
+    return { x0: x0 + Math.max(0, left - pad), y0: y0 + Math.max(0, a - pad), x1: x0 + Math.min(cw, right + pad + 1), y1: y0 + Math.min(ch, b + pad) };
+  });
+}
+
+// The rows of a region where a light band runs across most of the width, if they are at least one
+// line tall. Returns that band (inset a little) or null.
+function lightBand(rgba, w, h, reg, lineH) {
+  const x0 = Math.max(0, reg.x0);
+  const x1 = Math.min(w, reg.x1);
+  const y0 = Math.max(0, reg.y0);
+  const y1 = Math.min(h, reg.y1);
+  let start = -1;
+  let best = null;
+  for (let y = y0; y <= y1; y++) {
+    let light = 0;
+    if (y < y1)
+      for (let x = x0; x < x1; x++) {
+        const i = (y * w + x) * 4;
+        if (Math.min(rgba[i], rgba[i + 1], rgba[i + 2]) > 170) light++;
+      }
+    const on = y < y1 && light >= (x1 - x0) * 0.45;
+    if (on && start < 0) start = y;
+    if (!on && start >= 0) {
+      if (!best || y - start > best[1] - best[0]) best = [start, y];
+      start = -1;
+    }
+  }
+  if (!best || best[1] - best[0] < Math.max(10, lineH)) return null;
+  // Inset past the tile frame: a dark edge in the crop reads as a bracket and garbles the line.
+  const inset = Math.round((x1 - x0) * 0.06);
+  return { x0: x0 + inset, y0: best[0] + 1, x1: x1 - inset, y1: best[1] - 1 };
 }
