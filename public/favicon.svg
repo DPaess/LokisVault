@@ -26,10 +26,9 @@
            C19.5 29 15.5 29.5 10.5 32
            C6.5 34 3 32.5 2.5 28 Z"
         fill="url(#ivory)" stroke="url(#gold)" stroke-width="3.2" stroke-linejoin="round"/>
-  <!-- angular gold inlays: chevrons down the centre and straight accents along the lobes -->
+  <!-- angular gold inlays: a chevron in the centre and straight accents along the lobes -->
   <g fill="none" stroke="#c9a14f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M24.5 19 L32 25.5 L39.5 19"/>
-    <path d="M27.5 34 L32 38.5 L36.5 34"/>
     <path d="M8 22 L17.5 19.8"/>
     <path d="M56 22 L46.5 19.8"/>
   </g>
