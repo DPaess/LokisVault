@@ -144,19 +144,9 @@ const spareOf = (need, part) => Math.max(0, owned(part) - (need[part] ?? 0));
 
 const setComplete = (set) => DATA.sets[set].parts.every((p) => owned(p.name) >= p.count);
 
-// Expected value of opening every copy of a relic you own, each at its own refinement.
-function stackEV(name) {
-  let plat = 0;
-  let ducats = 0;
-  for (const r of REFS) {
-    const n = state.relics[name]?.[r] ?? 0;
-    if (!n) continue;
-    const ev = relicEV(name, r);
-    plat += n * ev.plat;
-    ducats += n * ev.ducats;
-  }
-  return { plat, ducats };
-}
+// Chance, in percent, that one opening at a refinement gives a part your wishlist still needs.
+const wantedChance = (name, ref, need) =>
+  sum(DATA.relics[name].rewards.filter((w) => missingOf(need, w.item) > 0).map((w) => w.chance[ref] ?? 0));
 // The most valuable single reward a relic can give, in plat.
 const topDrop = (name) => Math.max(0, ...DATA.relics[name].rewards.map((w) => priceOf(w.item) ?? 0));
 
@@ -341,16 +331,21 @@ function relicCard(name, need) {
       </div>
       <div class="rewards">${relic.rewards.map((w) => rewardLine(w, ref, need)).join('')}</div>
       <div class="ev">
-        <span>EV intact <b>${fmtP(ev.intact.plat, 1)}</b> / ${fmtD(ev.intact.ducats, 1)}</span>
-        <span>EV radiant <b>${fmtP(ev.radiant.plat, 1)}</b> / ${fmtD(ev.radiant.ducats, 1)}</span>
+        <span>Avg intact <b>${fmtP(ev.intact.plat, 1)}</b> / ${fmtD(ev.intact.ducats, 1)}</span>
+        <span>Avg radiant <b>${fmtP(ev.radiant.plat, 1)}</b> / ${fmtD(ev.radiant.ducats, 1)}</span>
       </div>
+      ${
+        wantedChance(name, 'intact', need) > 0
+          ? `<div class="ev"><span>Wanted intact <b>${fmtPct(wantedChance(name, 'intact', need))}</b></span><span>Wanted radiant <b>${fmtPct(wantedChance(name, 'radiant', need))}</b></span></div>`
+          : ''
+      }
       <div class="small muted">Chances shown for ${REF_LABEL[ref].toLowerCase()}.</div>
     </article>`;
 }
 
 // Owned relics passing the Relics tab filters, unsorted.
 function relicsShown(need = needs()) {
-  const f = (ui.relics ??= { q: '', filter: 'all', era: '', sort: 'ev' });
+  const f = (ui.relics ??= { q: '', filter: 'all', era: '', sort: 'plat', as: 'intact' });
   const q = norm(f.q);
   const hasWanted = (r) => DATA.relics[r].rewards.some((w) => missingOf(need, w.item) > 0);
   let names = Object.keys(state.relics);
@@ -367,26 +362,31 @@ VIEWS.relics = () => {
   const need = needs();
   const names = relicsShown(need);
   const f = ui.relics;
-  const evOf = (r) => relicEV(r, bestRef(r)).plat;
+  // Wanted, plat and ducats are measured at the chosen refinement, or as what Radiant adds over Intact.
+  const metric = {
+    wanted: (r, ref) => wantedChance(r, ref, need),
+    plat: (r, ref) => relicEV(r, ref).plat,
+    ducats: (r, ref) => relicEV(r, ref).ducats,
+  };
+  const byRefinement = Boolean(metric[f.sort]);
+  const value = (r) => {
+    const m = metric[f.sort];
+    return f.as === 'gain' ? m(r, 'radiant') - m(r, 'intact') : m(r, f.as === 'radiant' ? 'radiant' : 'intact');
+  };
   const sorters = {
-    ev: (a, b) => evOf(b) - evOf(a),
-    evd: (a, b) => relicEV(b, bestRef(b)).ducats - relicEV(a, bestRef(a)).ducats,
-    stack: (a, b) => stackEV(b).plat - stackEV(a).plat,
-    stackd: (a, b) => stackEV(b).ducats - stackEV(a).ducats,
     top: (a, b) => topDrop(b) - topDrop(a),
     name: (a, b) => eraRank(DATA.relics[a].era) - eraRank(DATA.relics[b].era) || a.localeCompare(b, 'en', { numeric: true }),
     count: (a, b) => relicTotal(b) - relicTotal(a),
     price: (a, b) => (relicPrice(b) ?? -1) - (relicPrice(a) ?? -1),
-    wanted: (a, b) => wantedIn(b) - wantedIn(a) || evOf(b) - evOf(a),
   };
-  const wantedIn = (r) => DATA.relics[r].rewards.filter((w) => missingOf(need, w.item) > 0).length;
-  names.sort((a, b) => (sorters[f.sort] ?? sorters.ev)(a, b) || a.localeCompare(b, 'en', { numeric: true }));
+  const cmp = byRefinement ? (a, b) => value(b) - value(a) : sorters[f.sort] ?? sorters.name;
+  names.sort((a, b) => cmp(a, b) || a.localeCompare(b, 'en', { numeric: true }));
   const total = Object.keys(state.relics).length;
   const eras = [...new Set(Object.keys(state.relics).map((r) => DATA.relics[r].era))].sort((a, b) => eraRank(a) - eraRank(b));
   const eraCount = (era) => sum(Object.keys(state.relics).filter((r) => DATA.relics[r].era === era).map(relicTotal));
 
   return `
-    ${head('Relics', 'Every relic you own, by refinement. Parts your wishlist still needs are highlighted in blue. EV is the average platinum and ducats one opening is worth at market prices.')}
+    ${head('Relics', 'Every relic you own, by refinement. Parts your wishlist still needs are highlighted in blue. Avg is what one opening is worth on average at market prices, in plat and ducats.')}
     <form class="toolbar" data-form="relic-add">
       <input class="grow" name="name" list="dl-relics" placeholder="Relic, e.g. Neo H4" autocomplete="off" data-focus="relic-add" required>
       <select name="ref">${REFS.map((r) => `<option value="${r}">${REF_LABEL[r]}</option>`).join('')}</select>
@@ -404,17 +404,22 @@ VIEWS.relics = () => {
       </select></label>
       <label class="field">Sort by<select data-change="relic-sort">
         ${[
-          ['ev', 'Plat per opening'],
-          ['evd', 'Ducats per opening'],
-          ['stack', 'Plat from all my copies'],
-          ['stackd', 'Ducats from all my copies'],
-          ['top', 'Best single drop (plat)'],
+          ['wanted', 'Wanted parts'],
+          ['plat', 'Average plat'],
+          ['ducats', 'Average ducats'],
           ['price', 'Relic price'],
-          ['wanted', 'Most wanted parts'],
-          ['count', 'How many I own'],
+          ['top', 'Best drop'],
+          ['count', 'Quantity'],
           ['name', 'Name'],
         ].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select></label>
+      ${
+        byRefinement
+          ? `<label class="field">Refinement<select data-change="relic-as">${[['intact', 'Intact'], ['radiant', 'Radiant'], ['gain', 'Radiant gain']]
+              .map(([v, l]) => `<option value="${v}"${f.as === v ? ' selected' : ''}>${l}</option>`)
+              .join('')}</select></label>`
+          : ''
+      }
       <span class="spacer"></span>
       <span class="muted small">${names.length} of ${total} relics shown</span>
       ${names.length ? `<button class="small danger" data-action="relics-remove-shown">${names.length === total ? `Remove all ${total}` : `Remove these ${names.length}`}</button>` : ''}
@@ -465,6 +470,10 @@ CHANGES['relic-filter'] = (el) => {
 };
 CHANGES['relic-era'] = (el) => {
   ui.relics.era = el.value;
+  render();
+};
+CHANGES['relic-as'] = (el) => {
+  ui.relics.as = el.value;
   render();
 };
 CHANGES['relic-sort'] = (el) => {
