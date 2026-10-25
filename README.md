@@ -16,11 +16,13 @@ I play Warframe through GeForce Now. The game runs in the cloud, so tools like A
 * **Wishlist**: prime sets you want. Each missing part shows which of your relics drop it, which relics you can farm today, or a warframe.market link when every source is vaulted. Mark a set as built to use up its parts and mark it mastered.
 * **Mastery**: every masterable item with mastered or not, remaining mastery points, filters and bulk marking for a quick first fill.
 * **Sell or ducat**: every spare part with its market price, ducat value and a verdict based on a ducats per plat threshold you choose, plus spare sets worth more sold whole.
-* **Data**: add items from inventory screenshots (text recognition runs in your browser, you review every match before it is added), JSON backup and restore, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
+* **Data**: add items from inventory screenshots (text recognition runs in your browser, you review every match before it is added), JSON backup and restore, optional sync between devices through a secret Gist on your own GitHub account, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
 
 ## Privacy
 
-Your inventory is stored only in your browser (`localStorage`). Nothing is sent anywhere. Screenshots you import are read on your device by [Tesseract.js](https://github.com/naptha/tesseract.js) and never uploaded (only the engine and its English model are downloaded from jsDelivr the first time). Use **Data → Export JSON** to keep a backup or move to another device.
+Your inventory is stored in your browser (`localStorage`). Nothing is sent anywhere unless you turn on sync.
+
+**Optional sync.** In Data → Sync between devices you can paste a GitHub token that only has the `gist` permission. The site then keeps your vault in a secret Gist on your own account (`lokisvault.json`) and talks only to `api.github.com`. The newest copy wins, and the copy it replaced stays restorable in that browser. The token is stored only in that browser and is never part of an exported backup. Secret Gists are unlisted, not encrypted, so anyone with the exact link could read your inventory. Screenshots you import are read on your device by [Tesseract.js](https://github.com/naptha/tesseract.js) and never uploaded (only the engine and its English model are downloaded from jsDelivr the first time). Use **Data → Export JSON** to keep a backup or move to another device.
 
 ## Is this safe with DE's terms?
 

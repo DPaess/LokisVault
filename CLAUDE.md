@@ -116,9 +116,12 @@ Vanilla JS ES module, no framework, no build step. Hash routing on the tabs alre
   parts:    { "Loki Prime Chassis Blueprint": 1 },
   wishlist: ["Loki Prime"],                 // set names
   mastered: { "/Lotus/Powersuits/Loki/LokiPrime": true },   // keyed by mastery id
-  settings: { ducatRatio: 10 }               // ducats per plat threshold
+  settings: { ducatRatio: 10 },              // ducats per plat threshold
+  savedAt: 1761350000000                     // ms, bumped by save(), newest copy wins in sync
 }
 ```
+
+Optional Gist sync keeps its own keys, never exported: `lokisvault:sync` (`{ token, gistId, at }`) and `lokisvault:v1:before-sync` (the local copy replaced by the last download, for Restore). The Gist file is `lokisvault.json` and holds the state above.
 
 Drop zero counts from storage. Wrap every localStorage access in try/catch.
 

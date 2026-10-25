@@ -45,7 +45,7 @@ function toast(msg) {
 
 // ---- State -----------------------------------------------------------------
 
-const emptyState = () => ({ v: 1, relics: {}, parts: {}, wishlist: [], mastered: {}, settings: { ducatRatio: 10 } });
+const emptyState = () => ({ v: 1, savedAt: 0, relics: {}, parts: {}, wishlist: [], mastered: {}, settings: { ducatRatio: 10 } });
 
 // Accepts anything JSON shaped and returns a clean state, dropping unknown names and zero counts.
 function sanitize(raw) {
@@ -64,6 +64,7 @@ function sanitize(raw) {
   for (const [id, v] of Object.entries(raw.mastered ?? {})) if (v) s.mastered[id] = true;
   const ratio = Number(raw.settings?.ducatRatio);
   if (ratio > 0) s.settings.ducatRatio = ratio;
+  s.savedAt = Number(raw.savedAt) > 0 ? Number(raw.savedAt) : 0;
   return s;
 }
 
@@ -75,15 +76,22 @@ function loadState() {
   }
 }
 
-function save(msg) {
-  state = sanitize(state);
+function writeLocal() {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    return true;
   } catch {
     toast('Could not save: browser storage is unavailable');
-    return;
+    return false;
   }
+}
+
+// Every change goes through here. savedAt lets sync tell which copy is newer.
+function save(msg) {
+  state = sanitize({ ...state, savedAt: Date.now() });
+  if (!writeLocal()) return;
   if (msg) toast(msg);
+  schedulePush();
 }
 
 // ---- Derived inventory -----------------------------------------------------
@@ -947,7 +955,7 @@ VIEWS.data = () => {
   const b = (ui.bulk ??= { mode: 'inventory', text: '', report: null });
   const r = b.report;
   return `
-    ${head('Data', 'Your inventory lives only in this browser. Export a backup now and then, especially before clearing site data or switching devices.')}
+    ${head('Data', 'Your inventory lives in this browser. Export a backup now and then, or turn on sync at the bottom to share it between your devices.')}
     ${shotsPanel()}
     <div class="panel">
       <h3>Bulk paste</h3>
@@ -987,7 +995,8 @@ VIEWS.data = () => {
         <button class="danger" data-action="reset">Reset everything</button>
       </div>
       <p class="small muted">Importing replaces everything in this browser with the file's contents.</p>
-    </div>`;
+    </div>
+    ${syncPanel()}`;
 };
 
 FORMS.bulk = (form, fd) => {
@@ -1028,11 +1037,239 @@ CHANGES.import = async (el) => {
   }
 };
 ACTIONS.reset = () => {
-  if (!confirm('Delete every relic, part, wishlist set and mastery mark stored in this browser? Export a backup first if unsure.')) return;
+  const where = sync?.token ? 'in this browser and, through sync, on your other devices' : 'in this browser';
+  if (!confirm(`Delete every relic, part, wishlist set and mastery mark stored ${where}? Export a backup first if unsure.`)) return;
   state = emptyState();
   save('Vault reset');
   render();
 };
+
+// ---- Sync: optional copy in the player's own secret GitHub Gist ------------------
+// Off unless the player pastes a GitHub token that can only manage gists. The token stays in this
+// browser under its own key, so it is never part of an exported backup. Newest copy wins.
+
+const SYNC_KEY = 'lokisvault:sync';
+const BEFORE_SYNC_KEY = 'lokisvault:v1:before-sync';
+const GIST_FILE = 'lokisvault.json';
+const TOKEN_URL = 'https://github.com/settings/tokens/new?scopes=gist&description=Loki%27s%20Vault%20sync';
+
+const readJson = (key) => {
+  try {
+    return JSON.parse(localStorage.getItem(key) || 'null');
+  } catch {
+    return null;
+  }
+};
+const writeJson = (key, value) => {
+  try {
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
+};
+
+let sync = readJson(SYNC_KEY); // { token, gistId, at } or null
+let syncBusy = null;
+let syncAgain = false; // a change landed while a sync was running
+let pushTimer;
+const syncStatus = { error: null };
+
+const isEmptyVault = (s) =>
+  !Object.keys(s.relics).length && !Object.keys(s.parts).length && !s.wishlist.length && !Object.keys(s.mastered).length;
+
+async function gh(path, { method = 'GET', body, token = sync?.token } = {}) {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    cache: 'no-store',
+  });
+  if (res.status === 401) throw Object.assign(new Error('GitHub rejected the token, it may have expired'), { status: 401 });
+  if (res.status === 404) throw Object.assign(new Error('not found'), { status: 404 });
+  if (!res.ok) throw Object.assign(new Error(`GitHub answered ${res.status}`), { status: res.status });
+  return res.json();
+}
+
+async function gistVault(gist) {
+  const file = gist.files?.[GIST_FILE];
+  if (!file) return null;
+  const text = file.truncated ? await (await fetch(file.raw_url, { cache: 'no-store' })).text() : file.content;
+  const raw = JSON.parse(text);
+  return raw?.v === 1 ? raw : null;
+}
+
+async function findVaultGist(token) {
+  for (let page = 1; page <= 5; page++) {
+    const list = await gh(`/gists?per_page=100&page=${page}`, { token });
+    const hit = list.find((g) => g.files?.[GIST_FILE]);
+    if (hit) return hit.id;
+    if (list.length < 100) return null;
+  }
+  return null;
+}
+
+const gistBody = () => ({
+  description: "Loki's Vault: Warframe inventory backup (https://dpaess.github.io/LokisVault/)",
+  files: { [GIST_FILE]: { content: JSON.stringify(state, null, 1) } },
+});
+
+async function pushGist() {
+  if (sync.gistId) {
+    try {
+      return await gh(`/gists/${sync.gistId}`, { method: 'PATCH', body: gistBody() });
+    } catch (err) {
+      if (err.status !== 404) throw err; // the gist was deleted on GitHub: make a new one
+    }
+  }
+  const gist = await gh('/gists', { method: 'POST', body: { ...gistBody(), public: false } });
+  sync.gistId = gist.id;
+  return gist;
+}
+
+// Replaces this browser's vault with one from the Gist, keeping the old one restorable.
+function adoptRemote(remote) {
+  if (!isEmptyVault(state)) writeJson(BEFORE_SYNC_KEY, state);
+  state = sanitize(remote);
+  writeLocal();
+}
+
+// Pulls when the Gist is newer, pushes when this browser is newer. Runs one at a time.
+function syncNow({ quiet = true } = {}) {
+  if (!sync?.token) return Promise.resolve();
+  if (syncBusy) {
+    syncAgain = true;
+    return syncBusy;
+  }
+  syncBusy = (async () => {
+    try {
+      let remote = null;
+      if (sync.gistId) {
+        try {
+          remote = await gistVault(await gh(`/gists/${sync.gistId}`));
+        } catch (err) {
+          if (err.status !== 404) throw err;
+        }
+      }
+      const remoteAt = Number(remote?.savedAt) || 0;
+      if (remote && remoteAt > state.savedAt) {
+        adoptRemote(remote);
+        toast('Loaded newer data from your Gist');
+        render();
+      } else if (!remote || remoteAt < state.savedAt) {
+        await pushGist();
+        if (!quiet) toast('Saved to your Gist');
+      } else if (!quiet) toast('Already in sync');
+      sync.at = Date.now();
+      syncStatus.error = null;
+      writeJson(SYNC_KEY, sync);
+    } catch (err) {
+      syncStatus.error = err.message;
+      if (!quiet || err.status === 401) toast(`Sync failed: ${err.message}`);
+    } finally {
+      syncBusy = null;
+      if (syncAgain) {
+        syncAgain = false;
+        schedulePush();
+      }
+      // Refresh the status, but never under someone typing (a half written bulk paste would be lost).
+      if (currentTab() === 'data' && !view.contains(document.activeElement)) render();
+    }
+  })();
+  return syncBusy;
+}
+
+function schedulePush() {
+  if (!sync?.token) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => syncNow(), 2000);
+}
+
+function syncPanel() {
+  const when = (t) => (t ? new Date(t).toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' }) : 'never');
+  const prev = readJson(BEFORE_SYNC_KEY);
+  const body = sync?.token
+    ? `<p class="small">Connected. Last synced ${esc(when(sync.at))}${syncBusy ? ', syncing now…' : ''}.
+         ${sync.gistId ? `Your data is in <a href="https://gist.github.com/${esc(sync.gistId)}" target="_blank" rel="noopener">this secret Gist</a>.` : ''}</p>
+       ${syncStatus.error ? `<div class="note small">Last sync failed: ${esc(syncStatus.error)}. Your data is still saved in this browser.</div>` : ''}
+       <div class="row" style="margin-top:8px">
+         <button data-action="sync-now" ${syncBusy ? 'disabled' : ''}>Sync now</button>
+         ${prev ? '<button class="ghost" data-action="sync-restore">Restore the copy from before the last download</button>' : ''}
+         <span class="spacer"></span>
+         <button class="danger" data-action="sync-off">Disconnect this browser</button>
+       </div>`
+    : `<ol class="small">
+         <li><a href="${TOKEN_URL}" target="_blank" rel="noopener">Create a GitHub token</a> (GitHub account needed). The link already ticks only the <b>gist</b> permission, so the token cannot touch anything else. Pick an expiry you like and click Generate.</li>
+         <li>Paste it below and connect. The site finds your existing vault Gist or creates a new secret one.</li>
+         <li>Do the same on your other devices with the same token.</li>
+       </ol>
+       <form class="toolbar" data-form="sync-connect">
+         <input class="grow" type="password" name="token" placeholder="ghp_…" autocomplete="off" spellcheck="false" required aria-label="GitHub token">
+         <button class="primary">Connect</button>
+       </form>`;
+  return `
+    <details class="panel"${sync?.token ? ' open' : ''}>
+      <summary><h3 style="display:inline">Sync between devices (optional)</h3></summary>
+      <p class="small muted">Keeps a copy of your vault in a secret Gist on your own GitHub account, so your PC and phone show the same data.
+        It loads the newest copy when you open the site and saves about two seconds after each change. The token stays in this browser only and is never part of an exported backup.
+        Secret Gists are unlisted, not encrypted: anyone with the exact link could read your inventory.</p>
+      ${body}
+    </details>`;
+}
+
+FORMS['sync-connect'] = async (form, fd) => {
+  const token = String(fd.get('token') ?? '').trim();
+  if (!token) return;
+  try {
+    toast('Connecting to GitHub…');
+    const gistId = await findVaultGist(token);
+    sync = { token, gistId, at: null };
+    if (gistId) {
+      const remote = await gistVault(await gh(`/gists/${gistId}`));
+      const useRemote =
+        remote &&
+        (isEmptyVault(state) ||
+          confirm(`Your Gist already has a vault, saved ${new Date(Number(remote.savedAt) || 0).toLocaleString('en')}.\n\nOK: load it into this browser (the data here is kept as a restorable copy).\nCancel: keep this browser's data and upload it to the Gist.`));
+      if (useRemote) adoptRemote(remote);
+      else {
+        state.savedAt = Date.now();
+        writeLocal();
+        await pushGist();
+      }
+    } else await pushGist();
+    sync.at = Date.now();
+    syncStatus.error = null;
+    writeJson(SYNC_KEY, sync);
+    toast(gistId ? 'Connected to your existing vault Gist' : 'Connected, created a secret Gist for your vault');
+  } catch (err) {
+    sync = null;
+    toast(`Could not connect: ${err.message}`);
+  }
+  render();
+};
+ACTIONS['sync-now'] = () => syncNow({ quiet: false });
+ACTIONS['sync-off'] = () => {
+  if (!confirm('Disconnect this browser? Your data stays here and in the Gist, only the token is removed from this browser.')) return;
+  sync = null;
+  writeJson(SYNC_KEY, null);
+  toast('Disconnected');
+  render();
+};
+ACTIONS['sync-restore'] = () => {
+  const prev = readJson(BEFORE_SYNC_KEY);
+  if (!prev || !confirm('Replace the current data with the copy this browser had before the last download from your Gist?')) return;
+  state = sanitize(prev);
+  writeJson(BEFORE_SYNC_KEY, null);
+  save('Previous copy restored');
+  render();
+};
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && sync?.token && Date.now() - (sync.at ?? 0) > 30000) syncNow();
+});
 
 // ---- Rendering and events --------------------------------------------------
 
@@ -1124,6 +1361,7 @@ async function init() {
   fillDatalists();
   fillSources();
   render();
+  syncNow();
 }
 
 init();
