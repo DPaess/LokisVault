@@ -33,6 +33,11 @@ const priceOf = (name) => PRICES[name]?.sellMed ?? PRICES[name]?.sell ?? null;
 const setPrice = (set) => priceOf(`${set} Set`);
 const relicPrice = (relic) => priceOf(`${relic} Relic`);
 const marketUrl = (name) => (PRICES[name]?.slug ? `https://warframe.market/items/${PRICES[name].slug}` : null);
+// Opens the item's warframe.market page in a new tab, where you place the sell order yourself.
+const sellLink = (name) =>
+  marketUrl(name)
+    ? `<a class="sell-link" href="${esc(marketUrl(name))}" target="_blank" rel="noopener" title="Open ${esc(name)} on warframe.market to list it for sale">Sell ↗</a>`
+    : '';
 
 function toast(msg, undoable = false) {
   document.querySelector('.toast')?.remove();
@@ -484,6 +489,7 @@ VIEWS.parts = () => {
       <td class="num">${n || ''} ${status}</td>
       <td class="num">${fmtD(DATA.parts[p].ducats)}</td>
       <td class="num">${fmtP(priceOf(p))}</td>
+      <td>${sellLink(p)}</td>
     </tr>`;
   });
   return `
@@ -517,7 +523,7 @@ VIEWS.parts = () => {
     ${
       names.length
         ? `<div class="table-wrap"><table>
-             <thead><tr><th>Part</th><th>Set</th><th class="num">Owned</th><th class="num">Needed</th><th class="num">Ducats</th><th class="num">Price</th></tr></thead>
+             <thead><tr><th>Part</th><th>Set</th><th class="num">Owned</th><th class="num">Needed</th><th class="num">Ducats</th><th class="num">Price</th><th></th></tr></thead>
              <tbody>${rows.join('')}</tbody>
            </table></div>
            ${pg.more}
@@ -879,7 +885,7 @@ VIEWS.trade = () => {
     ${
       rows.length
         ? `<div class="table-wrap"><table>
-            <thead><tr><th>Part</th><th class="num">Spare</th><th class="num">Price</th><th class="num">Best buy</th><th class="num">Ducats</th><th class="num">D / p</th><th>Verdict</th><th class="num">Stack</th></tr></thead>
+            <thead><tr><th>Part</th><th class="num">Spare</th><th class="num">Price</th><th class="num">Best buy</th><th class="num">Ducats</th><th class="num">D / p</th><th>Verdict</th><th class="num">Stack</th><th></th></tr></thead>
             <tbody>${pg.items
               .map(
                 (r) => `<tr>
@@ -891,6 +897,7 @@ VIEWS.trade = () => {
                   <td class="num">${r.v.ratio == null ? '–' : fmtNum(r.v.ratio, 1)}</td>
                   <td><span class="verdict ${r.v.key}">${r.v.label}</span></td>
                   <td class="num">${r.v.key === 'ducat' ? fmtD(r.ducats * r.n) : fmtP(r.price == null ? null : r.price * r.n)}</td>
+                  <td>${sellLink(r.p)}</td>
                 </tr>`,
               )
               .join('')}</tbody>
