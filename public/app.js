@@ -147,6 +147,26 @@ const setComplete = (set) => DATA.sets[set].parts.every((p) => owned(p.name) >= 
 // Chance, in percent, that one opening at a refinement gives a part your wishlist still needs.
 const wantedChance = (name, ref, need) =>
   sum(DATA.relics[name].rewards.filter((w) => missingOf(need, w.item) > 0).map((w) => w.chance[ref] ?? 0));
+
+// For each goal, a relic's value at every refinement and which refinement gives the most.
+// Upgrading raises rare drops and lowers common ones, so the best refinement depends on the goal.
+// minGain: the smallest improvement over Intact worth spending Void Traces on.
+const RELIC_GOALS = {
+  wanted: { label: 'Wanted', minGain: 2, of: (r, ref, need) => wantedChance(r, ref, need), fmt: (v) => fmtPct(v) },
+  plat: { label: 'Plat', minGain: 1, of: (r, ref) => relicEV(r, ref).plat, fmt: (v) => fmtP(v, 1) },
+  ducats: { label: 'Ducats', minGain: 3, of: (r, ref) => relicEV(r, ref).ducats, fmt: (v) => fmtD(v, 1) },
+};
+// Stay Intact unless upgrading clearly pays (minGain and at least 10% better). When it does, take
+// the cheapest refinement that reaches most (85%) of the best possible gain.
+function bestRefinement(name, goal, need) {
+  const g = RELIC_GOALS[goal];
+  const values = Object.fromEntries(REFS.map((r) => [r, g.of(name, r, need)]));
+  const top = Math.max(...Object.values(values));
+  const gain = top - values.intact;
+  let ref = 'intact';
+  if (gain >= g.minGain && gain >= values.intact * 0.1) ref = REFS.find((r) => values[r] - values.intact >= gain * 0.85);
+  return { ref, value: values[ref], values };
+}
 // The most valuable single reward a relic can give, in plat.
 const topDrop = (name) => Math.max(0, ...DATA.relics[name].rewards.map((w) => priceOf(w.item) ?? 0));
 
@@ -315,7 +335,6 @@ function rewardLine(w, ref, need) {
 function relicCard(name, need) {
   const relic = DATA.relics[name];
   const ref = bestRef(name);
-  const ev = { intact: relicEV(name, 'intact'), radiant: relicEV(name, 'radiant') };
   const price = relicPrice(name);
   return `
     <article class="card">
@@ -330,22 +349,24 @@ function relicCard(name, need) {
         ).join('')}
       </div>
       <div class="rewards">${relic.rewards.map((w) => rewardLine(w, ref, need)).join('')}</div>
-      <div class="ev">
-        <span>Avg intact <b>${fmtP(ev.intact.plat, 1)}</b> / ${fmtD(ev.intact.ducats, 1)}</span>
-        <span>Avg radiant <b>${fmtP(ev.radiant.plat, 1)}</b> / ${fmtD(ev.radiant.ducats, 1)}</span>
-      </div>
-      ${
-        wantedChance(name, 'intact', need) > 0
-          ? `<div class="ev"><span>Wanted intact <b>${fmtPct(wantedChance(name, 'intact', need))}</b></span><span>Wanted radiant <b>${fmtPct(wantedChance(name, 'radiant', need))}</b></span></div>`
-          : ''
-      }
-      <div class="small muted">Chances shown for ${REF_LABEL[ref].toLowerCase()}.</div>
+      <table class="refine">
+        <tr><th></th><th>Intact</th><th>Radiant</th><th>Best</th></tr>
+        ${Object.entries(RELIC_GOALS)
+          .filter(([goal]) => goal !== 'wanted' || wantedChance(name, 'radiant', need) > 0 || wantedChance(name, 'intact', need) > 0)
+          .map(([goal, g]) => {
+            const b = bestRefinement(name, goal, need);
+            const extra = b.ref === 'exceptional' || b.ref === 'flawless' ? ` ${g.fmt(b.value)}` : '';
+            return `<tr><th>${g.label}</th><td>${g.fmt(b.values.intact)}</td><td>${g.fmt(b.values.radiant)}</td><td class="best">${REF_LABEL[b.ref]}${extra}</td></tr>`;
+          })
+          .join('')}
+      </table>
+      <div class="small muted">Drop chances above are for ${REF_LABEL[ref].toLowerCase()}, the best refinement you own.</div>
     </article>`;
 }
 
 // Owned relics passing the Relics tab filters, unsorted.
 function relicsShown(need = needs()) {
-  const f = (ui.relics ??= { q: '', filter: 'all', era: '', sort: 'plat', as: 'intact' });
+  const f = (ui.relics ??= { q: '', filter: 'all', era: '', sort: 'plat' });
   const q = norm(f.q);
   const hasWanted = (r) => DATA.relics[r].rewards.some((w) => missingOf(need, w.item) > 0);
   let names = Object.keys(state.relics);
@@ -362,31 +383,23 @@ VIEWS.relics = () => {
   const need = needs();
   const names = relicsShown(need);
   const f = ui.relics;
-  // Wanted, plat and ducats are measured at the chosen refinement, or as what Radiant adds over Intact.
-  const metric = {
-    wanted: (r, ref) => wantedChance(r, ref, need),
-    plat: (r, ref) => relicEV(r, ref).plat,
-    ducats: (r, ref) => relicEV(r, ref).ducats,
-  };
-  const byRefinement = Boolean(metric[f.sort]);
-  const value = (r) => {
-    const m = metric[f.sort];
-    return f.as === 'gain' ? m(r, 'radiant') - m(r, 'intact') : m(r, f.as === 'radiant' ? 'radiant' : 'intact');
-  };
+  // Wanted, plat and ducats sort by each relic's value at its own best refinement.
+  const byGoal = Boolean(RELIC_GOALS[f.sort]);
+  const value = (r) => bestRefinement(r, f.sort, need).value;
   const sorters = {
     top: (a, b) => topDrop(b) - topDrop(a),
     name: (a, b) => eraRank(DATA.relics[a].era) - eraRank(DATA.relics[b].era) || a.localeCompare(b, 'en', { numeric: true }),
     count: (a, b) => relicTotal(b) - relicTotal(a),
     price: (a, b) => (relicPrice(b) ?? -1) - (relicPrice(a) ?? -1),
   };
-  const cmp = byRefinement ? (a, b) => value(b) - value(a) : sorters[f.sort] ?? sorters.name;
+  const cmp = byGoal ? (a, b) => value(b) - value(a) : sorters[f.sort] ?? sorters.name;
   names.sort((a, b) => cmp(a, b) || a.localeCompare(b, 'en', { numeric: true }));
   const total = Object.keys(state.relics).length;
   const eras = [...new Set(Object.keys(state.relics).map((r) => DATA.relics[r].era))].sort((a, b) => eraRank(a) - eraRank(b));
   const eraCount = (era) => sum(Object.keys(state.relics).filter((r) => DATA.relics[r].era === era).map(relicTotal));
 
   return `
-    ${head('Relics', 'Every relic you own, by refinement. Parts your wishlist still needs are highlighted in blue. Avg is what one opening is worth on average at market prices, in plat and ducats.')}
+    ${head('Relics', 'Every relic you own, by refinement. Parts your wishlist still needs are highlighted in blue. Each card compares Intact and Radiant for your wanted parts (chance per opening), average plat and average ducats, and names the best refinement.')}
     <form class="toolbar" data-form="relic-add">
       <input class="grow" name="name" list="dl-relics" placeholder="Relic, e.g. Neo H4" autocomplete="off" data-focus="relic-add" required>
       <select name="ref">${REFS.map((r) => `<option value="${r}">${REF_LABEL[r]}</option>`).join('')}</select>
@@ -413,13 +426,7 @@ VIEWS.relics = () => {
           ['name', 'Name'],
         ].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select></label>
-      ${
-        byRefinement
-          ? `<label class="field">Refinement<select data-change="relic-as">${[['intact', 'Intact'], ['radiant', 'Radiant'], ['gain', 'Radiant gain']]
-              .map(([v, l]) => `<option value="${v}"${f.as === v ? ' selected' : ''}>${l}</option>`)
-              .join('')}</select></label>`
-          : ''
-      }
+
       <span class="spacer"></span>
       <span class="muted small">${names.length} of ${total} relics shown</span>
       ${names.length ? `<button class="small danger" data-action="relics-remove-shown">${names.length === total ? `Remove all ${total}` : `Remove these ${names.length}`}</button>` : ''}
@@ -470,10 +477,6 @@ CHANGES['relic-filter'] = (el) => {
 };
 CHANGES['relic-era'] = (el) => {
   ui.relics.era = el.value;
-  render();
-};
-CHANGES['relic-as'] = (el) => {
-  ui.relics.as = el.value;
   render();
 };
 CHANGES['relic-sort'] = (el) => {
