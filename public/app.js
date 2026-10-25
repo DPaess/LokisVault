@@ -634,7 +634,7 @@ const setProgress = (set) => {
 
 VIEWS.wishlist = () => {
   const need = needs();
-  const f = (ui.wish ??= { q: '', category: '', status: '', source: '', sort: 'name' });
+  const f = (ui.wish ??= { q: '', category: '', status: '', source: '', sort: 'name', dir: 'asc' });
   const q = norm(f.q);
   const inMyRelics = (set) => setMissing(set).some((p) => (DATA.parts[p.name]?.relics ?? []).some((r) => relicTotal(r) > 0));
   const sources = {
@@ -649,14 +649,16 @@ VIEWS.wishlist = () => {
       (!f.status || (f.status === 'ready') === setComplete(set)) &&
       (!f.source || sources[f.source](set)),
   );
+  // Each sort's natural order (A to Z, fewest missing, cheapest to finish, priciest set); ▲/▼ reverses.
+  const missingUnits = (set) => sum(DATA.sets[set].parts.map((p) => Math.max(0, p.count - owned(p.name))));
   const sorters = {
     name: (a, b) => a.localeCompare(b),
-    progress: (a, b) => setProgress(b) - setProgress(a) || a.localeCompare(b),
-    missing: (a, b) => setMissing(a).length - setMissing(b).length || a.localeCompare(b),
-    cost: (a, b) => toFinish(a) - toFinish(b) || a.localeCompare(b),
-    price: (a, b) => (setPrice(b) ?? -1) - (setPrice(a) ?? -1) || a.localeCompare(b),
+    missing: (a, b) => missingUnits(a) - missingUnits(b) || setProgress(b) - setProgress(a),
+    cost: (a, b) => toFinish(a) - toFinish(b),
+    price: (a, b) => (setPrice(b) ?? -1) - (setPrice(a) ?? -1),
   };
-  sets.sort(sorters[f.sort] ?? sorters.name);
+  const sign = f.dir === 'desc' ? -1 : 1;
+  sets.sort((a, b) => sign * (sorters[f.sort] ?? sorters.name)(a, b) || a.localeCompare(b));
   const categories = [...new Set(state.wishlist.map((s) => DATA.sets[s].category))].sort();
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
   return `
@@ -670,9 +672,9 @@ VIEWS.wishlist = () => {
         ? `<div class="toolbar">
              <input class="grow" type="search" placeholder="Search your wishlist" value="${esc(f.q)}" data-input="wish-q" data-focus="wish-q">
              <label class="field">Category<select data-change="wish-filter" data-key="category">${opt('', 'All', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select></label>
-             <label class="field">Progress<select data-change="wish-filter" data-key="status">${opt('', 'Any', f.status)}${opt('ready', 'Ready to build', f.status)}${opt('missing', 'Missing parts', f.status)}</select></label>
-             <label class="field">Where parts come from<select data-change="wish-filter" data-key="source">${opt('', 'Anywhere', f.source)}${opt('open', 'Set not vaulted', f.source)}${opt('vaulted', 'Set vaulted', f.source)}${opt('mine', 'Missing parts are in my relics', f.source)}</select></label>
-             <label class="field">Sort by<select data-change="wish-filter" data-key="sort">${opt('name', 'Name', f.sort)}${opt('progress', 'Closest to done', f.sort)}${opt('missing', 'Fewest missing parts', f.sort)}${opt('price', 'Set price', f.sort)}${opt('cost', 'Cheapest to finish', f.sort)}</select></label>
+             <label class="field">Progress<select data-change="wish-filter" data-key="status">${opt('', 'Any', f.status)}${opt('ready', 'Ready', f.status)}${opt('missing', 'Missing', f.status)}</select></label>
+             <label class="field">Source<select data-change="wish-filter" data-key="source">${opt('', 'Any', f.source)}${opt('mine', 'In my relics', f.source)}${opt('open', 'Farmable', f.source)}${opt('vaulted', 'Vaulted', f.source)}</select></label>
+             <label class="field">Sort by<span class="row"><select data-change="wish-filter" data-key="sort">${opt('name', 'Name', f.sort)}${opt('missing', 'Missing parts', f.sort)}${opt('cost', 'Plat to finish', f.sort)}${opt('price', 'Set price', f.sort)}</select><button type="button" class="small ghost" data-action="wish-dir" title="Reverse the order">${f.dir === 'desc' ? '▼' : '▲'}</button></span></label>
              <span class="muted small">${sets.length} of ${state.wishlist.length} sets shown</span>
              ${sets.length ? `<button class="small danger" data-action="wish-remove-shown" data-sets="${esc(JSON.stringify(sets))}">${sets.length === state.wishlist.length ? `Remove all ${sets.length}` : `Remove these ${sets.length}`}</button>` : ''}
            </div>`
@@ -693,6 +695,11 @@ INPUTS['wish-q'] = (el) => {
 };
 CHANGES['wish-filter'] = (el) => {
   ui.wish[el.dataset.key] = el.value;
+  if (el.dataset.key === 'sort') ui.wish.dir = 'asc';
+  render();
+};
+ACTIONS['wish-dir'] = () => {
+  ui.wish.dir = ui.wish.dir === 'desc' ? 'asc' : 'desc';
   render();
 };
 
