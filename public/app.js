@@ -192,6 +192,9 @@ VIEWS.overview = () => {
 const relicIndex = () => (relicIndex.map ??= new Map(Object.keys(DATA.relics).map((k) => [norm(k), k])));
 const resolveRelic = (text) => relicIndex().get(norm(text).replace(/\brelic\b/g, '').replace(/\s+/g, ' ').trim()) ?? null;
 
+const ERA_ORDER = ['Lith', 'Meso', 'Neo', 'Axi', 'Requiem', 'Vanguard'];
+const eraRank = (era) => (ERA_ORDER.includes(era) ? ERA_ORDER.indexOf(era) : ERA_ORDER.length);
+
 const relicBadge = (name) =>
   DATA.relics[name].farmable ? '<span class="badge farm">Dropping now</span>' : '<span class="badge vault">Vaulted</span>';
 
@@ -232,19 +235,23 @@ function relicCard(name, need) {
 
 VIEWS.relics = () => {
   const need = needs();
-  const f = (ui.relics ??= { filter: 'all', sort: 'ev' });
+  const f = (ui.relics ??= { filter: 'all', era: '', sort: 'ev' });
   const hasWanted = (r) => DATA.relics[r].rewards.some((w) => missingOf(need, w.item) > 0);
   let names = Object.keys(state.relics);
   if (f.filter === 'wanted') names = names.filter(hasWanted);
   if (f.filter === 'vaulted') names = names.filter((r) => !DATA.relics[r].farmable);
+  if (f.era && !Object.keys(state.relics).some((r) => DATA.relics[r].era === f.era)) f.era = '';
+  if (f.era) names = names.filter((r) => DATA.relics[r].era === f.era);
   const evOf = (r) => relicEV(r, bestRef(r)).plat;
   const sorters = {
     ev: (a, b) => evOf(b) - evOf(a),
-    name: (a, b) => a.localeCompare(b, 'en', { numeric: true }),
+    name: (a, b) => eraRank(DATA.relics[a].era) - eraRank(DATA.relics[b].era) || a.localeCompare(b, 'en', { numeric: true }),
     count: (a, b) => relicTotal(b) - relicTotal(a),
   };
   names.sort(sorters[f.sort] ?? sorters.ev);
   const total = Object.keys(state.relics).length;
+  const eras = [...new Set(Object.keys(state.relics).map((r) => DATA.relics[r].era))].sort((a, b) => eraRank(a) - eraRank(b));
+  const eraCount = (era) => sum(Object.keys(state.relics).filter((r) => DATA.relics[r].era === era).map(relicTotal));
 
   return `
     ${head('Relics', 'Every relic you own, by refinement. Parts your wishlist still needs are highlighted in blue. EV is the average platinum and ducats one opening is worth at market prices.')}
@@ -257,6 +264,10 @@ VIEWS.relics = () => {
     <div class="toolbar">
       <select data-change="relic-filter" aria-label="Filter">
         ${[['all', 'All relics'], ['wanted', 'Has parts I need'], ['vaulted', 'Vaulted only']].map(([v, l]) => `<option value="${v}"${f.filter === v ? ' selected' : ''}>${l}</option>`).join('')}
+      </select>
+      <select data-change="relic-era" aria-label="Relic type">
+        <option value="">All types</option>
+        ${eras.map((e) => `<option value="${esc(e)}"${f.era === e ? ' selected' : ''}>${esc(e)} (${eraCount(e)})</option>`).join('')}
       </select>
       <select data-change="relic-sort" aria-label="Sort">
         ${[['ev', 'Sort by EV'], ['name', 'Sort by name'], ['count', 'Sort by count']].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
@@ -290,6 +301,10 @@ CHANGES['relic-count'] = (el) => {
 };
 CHANGES['relic-filter'] = (el) => {
   ui.relics.filter = el.value;
+  render();
+};
+CHANGES['relic-era'] = (el) => {
+  ui.relics.era = el.value;
   render();
 };
 CHANGES['relic-sort'] = (el) => {
