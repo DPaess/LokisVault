@@ -144,6 +144,22 @@ const spareOf = (need, part) => Math.max(0, owned(part) - (need[part] ?? 0));
 
 const setComplete = (set) => DATA.sets[set].parts.every((p) => owned(p.name) >= p.count);
 
+// Expected value of opening every copy of a relic you own, each at its own refinement.
+function stackEV(name) {
+  let plat = 0;
+  let ducats = 0;
+  for (const r of REFS) {
+    const n = state.relics[name]?.[r] ?? 0;
+    if (!n) continue;
+    const ev = relicEV(name, r);
+    plat += n * ev.plat;
+    ducats += n * ev.ducats;
+  }
+  return { plat, ducats };
+}
+// The most valuable single reward a relic can give, in plat.
+const topDrop = (name) => Math.max(0, ...DATA.relics[name].rewards.map((w) => priceOf(w.item) ?? 0));
+
 // Expected value of opening one relic at a refinement, in plat and ducats.
 function relicEV(name, ref) {
   let plat = 0;
@@ -354,6 +370,10 @@ VIEWS.relics = () => {
   const evOf = (r) => relicEV(r, bestRef(r)).plat;
   const sorters = {
     ev: (a, b) => evOf(b) - evOf(a),
+    evd: (a, b) => relicEV(b, bestRef(b)).ducats - relicEV(a, bestRef(a)).ducats,
+    stack: (a, b) => stackEV(b).plat - stackEV(a).plat,
+    stackd: (a, b) => stackEV(b).ducats - stackEV(a).ducats,
+    top: (a, b) => topDrop(b) - topDrop(a),
     name: (a, b) => eraRank(DATA.relics[a].era) - eraRank(DATA.relics[b].era) || a.localeCompare(b, 'en', { numeric: true }),
     count: (a, b) => relicTotal(b) - relicTotal(a),
     price: (a, b) => (relicPrice(b) ?? -1) - (relicPrice(a) ?? -1),
@@ -375,16 +395,26 @@ VIEWS.relics = () => {
     </form>
     <div class="toolbar">
       <input class="grow" type="search" placeholder="Search relics or what they drop" value="${esc(f.q ?? '')}" data-input="relic-q" data-focus="relic-q">
-      <select data-change="relic-filter" aria-label="Filter">
+      <label class="field">Show<select data-change="relic-filter">
         ${[['all', 'All relics'], ['wanted', 'Has parts I need'], ['vaulted', 'Vaulted only']].map(([v, l]) => `<option value="${v}"${f.filter === v ? ' selected' : ''}>${l}</option>`).join('')}
-      </select>
-      <select data-change="relic-era" aria-label="Relic type">
+      </select></label>
+      <label class="field">Type<select data-change="relic-era">
         <option value="">All types</option>
         ${eras.map((e) => `<option value="${esc(e)}"${f.era === e ? ' selected' : ''}>${esc(e)} (${eraCount(e)})</option>`).join('')}
-      </select>
-      <select data-change="relic-sort" aria-label="Sort">
-        ${[['ev', 'Sort by EV'], ['price', 'Relic price'], ['wanted', 'Most wanted parts'], ['count', 'Sort by count'], ['name', 'Sort by name']].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
-      </select>
+      </select></label>
+      <label class="field">Sort by<select data-change="relic-sort">
+        ${[
+          ['ev', 'Plat per opening'],
+          ['evd', 'Ducats per opening'],
+          ['stack', 'Plat from all my copies'],
+          ['stackd', 'Ducats from all my copies'],
+          ['top', 'Best single drop (plat)'],
+          ['price', 'Relic price'],
+          ['wanted', 'Most wanted parts'],
+          ['count', 'How many I own'],
+          ['name', 'Name'],
+        ].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
+      </select></label>
       <span class="spacer"></span>
       <span class="muted small">${names.length} of ${total} relics shown</span>
       ${names.length ? `<button class="small danger" data-action="relics-remove-shown">${names.length === total ? `Remove all ${total}` : `Remove these ${names.length}`}</button>` : ''}
@@ -717,10 +747,10 @@ VIEWS.wishlist = () => {
       state.wishlist.length
         ? `<div class="toolbar">
              <input class="grow" type="search" placeholder="Search your wishlist" value="${esc(f.q)}" data-input="wish-q" data-focus="wish-q">
-             <select data-change="wish-filter" data-key="category" aria-label="Category">${opt('', 'All categories', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select>
-             <select data-change="wish-filter" data-key="status" aria-label="Status">${opt('', 'Any progress', f.status)}${opt('ready', 'Ready to build', f.status)}${opt('missing', 'Missing parts', f.status)}</select>
-             <select data-change="wish-filter" data-key="source" aria-label="Source">${opt('', 'Any source', f.source)}${opt('open', 'Not vaulted', f.source)}${opt('vaulted', 'Vaulted', f.source)}${opt('mine', 'Missing parts in my relics', f.source)}</select>
-             <select data-change="wish-filter" data-key="sort" aria-label="Sort">${opt('name', 'Sort by name', f.sort)}${opt('progress', 'Closest to done', f.sort)}${opt('missing', 'Fewest missing parts', f.sort)}${opt('price', 'Set price', f.sort)}${opt('cost', 'Cheapest to finish', f.sort)}</select>
+             <label class="field">Category<select data-change="wish-filter" data-key="category">${opt('', 'All', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select></label>
+             <label class="field">Progress<select data-change="wish-filter" data-key="status">${opt('', 'Any', f.status)}${opt('ready', 'Ready to build', f.status)}${opt('missing', 'Missing parts', f.status)}</select></label>
+             <label class="field">Where parts come from<select data-change="wish-filter" data-key="source">${opt('', 'Anywhere', f.source)}${opt('open', 'Set not vaulted', f.source)}${opt('vaulted', 'Set vaulted', f.source)}${opt('mine', 'Missing parts are in my relics', f.source)}</select></label>
+             <label class="field">Sort by<select data-change="wish-filter" data-key="sort">${opt('name', 'Name', f.sort)}${opt('progress', 'Closest to done', f.sort)}${opt('missing', 'Fewest missing parts', f.sort)}${opt('price', 'Set price', f.sort)}${opt('cost', 'Cheapest to finish', f.sort)}</select></label>
              <span class="muted small">${sets.length} of ${state.wishlist.length} sets shown</span>
              ${sets.length ? `<button class="small danger" data-action="wish-remove-shown" data-sets="${esc(JSON.stringify(sets))}">${sets.length === state.wishlist.length ? `Remove all ${sets.length}` : `Remove these ${sets.length}`}</button>` : ''}
            </div>`
