@@ -376,6 +376,122 @@ CHANGES['part-count'] = (el) => {
   render();
 };
 
+// ---- Wishlist ------------------------------------------------------------------
+
+const setIndex = () => (setIndex.map ??= new Map(Object.keys(DATA.sets).map((k) => [norm(k), k])));
+const resolveSet = (text) => setIndex().get(norm(text).replace(/ set$/, '')) ?? null;
+
+const chanceIn = (relic, part, ref) => DATA.relics[relic]?.rewards.find((w) => w.item === part)?.chance[ref] ?? null;
+const refShort = { intact: 'I', exceptional: 'E', flawless: 'F', radiant: 'R' };
+const countsShort = (relic) =>
+  REFS.filter((r) => state.relics[relic]?.[r] > 0).map((r) => `${state.relics[relic][r]}${refShort[r]}`).join(' ');
+
+function whereToGet(part) {
+  const info = DATA.parts[part];
+  const relics = info?.relics ?? [];
+  const lines = [];
+  const mine = relics.filter((r) => relicTotal(r) > 0);
+  if (mine.length) {
+    lines.push(`In your relics: ${mine
+      .map((r) => `<b>${esc(r)}</b> (${countsShort(r)}, ${fmtPct(chanceIn(r, part, bestRef(r)))})`)
+      .join(', ')}`);
+  }
+  const farm = relics.filter((r) => DATA.relics[r].farmable).sort((a, b) => chanceIn(b, part, 'intact') - chanceIn(a, part, 'intact'));
+  if (farm.length) {
+    lines.push(`Farm: ${farm
+      .map((r) => `<b>${esc(r)}</b> ${fmtPct(chanceIn(r, part, 'intact'))} → ${fmtPct(chanceIn(r, part, 'radiant'))} rad`)
+      .join(', ')}`);
+  } else {
+    const price = priceOf(part);
+    const url = marketUrl(part);
+    const buy = price != null ? `Buy on ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">warframe.market</a>` : 'warframe.market'} for ~${fmtP(price)}` : `Buy it on ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">warframe.market</a>` : 'warframe.market'}`;
+    lines.push(`<span class="badge vault">Vaulted</span> ${buy}, or wait for its relics in Prime Resurgence (Varzia).`);
+  }
+  return lines.map((l) => `<div>${l}</div>`).join('');
+}
+
+function wishCard(set, need) {
+  const s = DATA.sets[set];
+  const have = sum(s.parts.map((p) => Math.min(owned(p.name), p.count)));
+  const total = sum(s.parts.map((p) => p.count));
+  const price = setPrice(set);
+  const url = marketUrl(`${set} Set`);
+  const lines = s.parts.map((p) => {
+    const o = owned(p.name);
+    // When several wishlist sets share a part, each card shows this set's own count against what you own.
+    const ok = o >= (need[p.name] ?? p.count);
+    return `<div class="part-line">
+      <span>${esc(p.name)}</span>
+      <span class="${ok ? 'ok' : 'miss'}">${o} / ${p.count}${(need[p.name] ?? 0) > p.count ? ` <span class="muted small">(${need[p.name]} for all sets)</span>` : ''}</span>
+      ${ok ? '' : `<div class="where">${whereToGet(p.name)}</div>`}
+    </div>`;
+  });
+  return `
+    <article class="card">
+      <header>
+        <div>
+          <h3>${esc(set)}</h3>
+          <div class="row small muted">${esc(s.category)} ${s.vaulted ? '<span class="badge vault">Vaulted</span>' : ''}
+            ${price != null ? `<span>Set ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${fmtP(price)}</a>` : fmtP(price)}</span>` : ''}
+            ${state.mastered[s.id] ? '<span class="badge gold">Mastered</span>' : ''}</div>
+        </div>
+        <button class="small ghost danger" data-action="wish-remove" data-set="${esc(set)}" title="Remove from wishlist">✕</button>
+      </header>
+      ${bar(have, total)}
+      <div class="small muted" style="margin-top:4px">${have} of ${total} parts</div>
+      <div style="margin-top:8px">${lines.join('')}</div>
+      <div class="row" style="margin-top:10px">
+        <span class="spacer"></span>
+        <button class="small${have === total ? ' primary' : ''}" data-action="wish-built" data-set="${esc(set)}">Mark as built</button>
+      </div>
+    </article>`;
+}
+
+VIEWS.wishlist = () => {
+  const need = needs();
+  const sets = [...state.wishlist].sort((a, b) => a.localeCompare(b));
+  return `
+    ${head('Wishlist', 'Prime sets you want to build. Missing parts show which of your relics can drop them, which relics you can farm today, or where to buy them if everything is vaulted.')}
+    <form class="toolbar" data-form="wish-add">
+      <input class="grow" name="name" list="dl-sets" placeholder="Set, e.g. Loki Prime" autocomplete="off" data-focus="wish-add" required>
+      <button class="primary">Add</button>
+    </form>
+    ${
+      sets.length
+        ? `<div class="grid cards">${sets.map((s) => wishCard(s, need)).join('')}</div>`
+        : '<div class="empty">Your wishlist is empty. Add a set above, or use “Add to wishlist” on an unmastered prime in Mastery.</div>'
+    }`;
+};
+
+function addToWishlist(set) {
+  if (state.wishlist.includes(set)) return toast(`${set} is already on your wishlist`);
+  state.wishlist.push(set);
+  save(`Added ${set} to your wishlist`);
+  render();
+}
+
+FORMS['wish-add'] = (form, fd) => {
+  const set = resolveSet(fd.get('name'));
+  if (!set) return toast(`Unknown prime set “${fd.get('name')}”`);
+  addToWishlist(set);
+};
+ACTIONS['wish-add'] = (el) => addToWishlist(el.dataset.set);
+ACTIONS['wish-remove'] = (el) => {
+  state.wishlist = state.wishlist.filter((s) => s !== el.dataset.set);
+  save(`Removed ${el.dataset.set} from your wishlist`);
+  render();
+};
+ACTIONS['wish-built'] = (el) => {
+  const set = el.dataset.set;
+  const s = DATA.sets[set];
+  if (!confirm(`Mark ${set} as built? Its parts you own are removed from your inventory and it is marked as mastered.`)) return;
+  for (const p of s.parts) state.parts[p.name] = Math.max(0, owned(p.name) - p.count);
+  state.wishlist = state.wishlist.filter((x) => x !== set);
+  state.mastered[s.id] = true;
+  save(`${set} built and marked as mastered`);
+  render();
+};
+
 const todo = (title) => () => `${head(title)}<div class="empty">Coming soon.</div>`;
 for (const [tab, title] of Object.entries({ relics: 'Relics', parts: 'Prime parts', wishlist: 'Wishlist', mastery: 'Mastery', trade: 'Sell or ducat', data: 'Data' })) {
   VIEWS[tab] ??= todo(title);
