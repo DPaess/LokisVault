@@ -923,7 +923,7 @@ VIEWS.trade = () => {
     ${
       rows.length
         ? `<div class="table-wrap"><table>
-            <thead><tr>${th('part', 'Part')}${th('spare', 'Spare', 'num')}${th('price', 'Price', 'num')}${th('buy', 'Best buy', 'num')}${th('ducats', 'Ducats', 'num')}${th('ratio', 'D / p', 'num')}${th('verdict', 'Verdict')}${th('stack', 'Stack', 'num')}<th></th></tr></thead>
+            <thead><tr>${th('part', 'Part')}${th('spare', 'Spare', 'num')}${th('price', 'Price', 'num')}${th('buy', 'Instant sell', 'num')}${th('ducats', 'Ducats', 'num')}${th('ratio', 'D / p', 'num')}${th('verdict', 'Verdict')}${th('stack', 'Stack', 'num')}<th></th></tr></thead>
             <tbody>${pg.items
               .map(
                 (r) => `<tr>
