@@ -166,6 +166,15 @@ async function main() {
     mastery,
   };
 
+  // Skip the write when only the timestamp would change, so the daily job commits real changes only.
+  let previous = null;
+  try {
+    previous = JSON.parse(await readFile(OUT, 'utf8'));
+  } catch {}
+  if (previous && JSON.stringify({ ...previous, generatedAt: null }) === JSON.stringify({ ...out, generatedAt: null })) {
+    console.log('items.json unchanged');
+    return;
+  }
   await mkdir(path.dirname(OUT), { recursive: true });
   await writeFile(OUT, JSON.stringify(out));
   console.log(
