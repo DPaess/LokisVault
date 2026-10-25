@@ -10,14 +10,23 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="14" fill="#11131a"/>
-  <!-- face: broad under the crest, narrowing to a pointed chin -->
-  <path d="M23.5 25 C22.5 37 26.5 49 32 59 C37.5 49 41.5 37 40.5 25 Z" fill="url(#ivory)" stroke="url(#gold)" stroke-width="2" stroke-linejoin="round"/>
-  <!-- hammerhead crest: flat, a small central peak, tips swept up and back -->
-  <path d="M3 9 C11 16.5 21 17.5 28 15.5 L32 11 L36 15.5 C43 17.5 53 16.5 61 9 C57 21 47 27.5 40 27.5 L24 27.5 C17 27.5 7 21 3 9 Z" fill="url(#ivory)" stroke="url(#gold)" stroke-width="1.6" stroke-linejoin="round"/>
-  <!-- gold inlay along the crest -->
-  <path d="M8.5 15.5 C15 21.5 21 23.5 26 23.5 L38 23.5 C43 23.5 49 21.5 55.5 15.5" fill="none" stroke="url(#gold)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- center ridge, brow and gem -->
-  <path d="M32 30 L32 55" stroke="url(#gold)" stroke-width="1.4" stroke-linecap="round"/>
-  <path d="M26 34 L32 31 L38 34" fill="none" stroke="url(#gold)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M32 14.5 L34.8 18.3 L32 22 L29.2 18.3 Z" fill="url(#gold)" stroke="#8a6526" stroke-width="0.6"/>
+  <!-- one silhouette: a smooth hammer bowing down to heavy rounded lobes, and a broad body
+       tapering to the chin -->
+  <path d="M2.5 28
+           C1.5 21 5 17.5 11 16.5
+           C18 15 25 13 32 13
+           C39 13 46 15 53 16.5
+           C59 17.5 62.5 21 61.5 28
+           C61 32.5 57.5 34 53.5 32
+           C48.5 29.5 44.5 29 41.5 31.5
+           C41.5 42 37.5 51 32 58
+           C26.5 51 22.5 42 22.5 31.5
+           C19.5 29 15.5 29.5 10.5 32
+           C6.5 34 3 32.5 2.5 28 Z"
+        fill="url(#ivory)" stroke="url(#gold)" stroke-width="2" stroke-linejoin="round"/>
+  <!-- eyes on the lobes, ridge and gem -->
+  <circle cx="7" cy="26" r="2.2" fill="url(#gold)" stroke="#8a6526" stroke-width="0.6"/>
+  <circle cx="57" cy="26" r="2.2" fill="url(#gold)" stroke="#8a6526" stroke-width="0.6"/>
+  <path d="M32 26 L32 54" stroke="url(#gold)" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M32 17 L34.8 21 L32 25 L29.2 21 Z" fill="url(#gold)" stroke="#8a6526" stroke-width="0.6"/>
 </svg>
