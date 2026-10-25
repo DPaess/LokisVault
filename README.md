@@ -1,6 +1,4 @@
-<img src="public/favicon.svg" alt="" width="96" align="right">
-
-# Loki's Vault
+# <img src="public/favicon.svg" alt="" width="44" valign="middle"> Loki's Vault
 
 A Warframe planner for players who cannot run overlays. Track the relics and prime parts you own, plan the prime sets you want, tick off mastery, and decide which spare parts to sell for platinum or trade to Baro Ki'Teer for ducats.
 
