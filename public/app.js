@@ -616,6 +616,7 @@ function wishCard(set, need) {
           <h3>${esc(set)}</h3>
           <div class="row small muted">${esc(s.category)} ${s.vaulted ? '<span class="badge vault">Vaulted</span>' : ''}
             ${price != null ? `<span>Set ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${fmtP(price)}</a>` : fmtP(price)}</span>` : ''}
+            ${have < total ? `<span title="What buying the parts you still miss would cost, at the lowest market prices">To finish ${fmtP(toFinish(set))}</span>` : ''}
             ${state.mastered[s.id] ? '<span class="badge gold">Mastered</span>' : ''}</div>
         </div>
         <button class="small ghost danger" data-action="wish-remove" data-set="${esc(set)}" title="Remove from wishlist">✕</button>
