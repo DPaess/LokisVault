@@ -1,23 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <defs>
     <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f6e2a6"/>
+      <stop offset="0" stop-color="#f3d892"/>
       <stop offset="1" stop-color="#b8893a"/>
     </linearGradient>
-    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3d4560"/>
-      <stop offset="1" stop-color="#161a24"/>
+    <linearGradient id="ivory" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#f7f3ea"/>
+      <stop offset="1" stop-color="#cdc4b2"/>
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="14" fill="#11131a"/>
-  <!-- horns: thick at the temples, sweeping out then back up to thin tips -->
-  <path d="M27 36 C15 34 6 26 6.5 5 C11 17 18 24 27.5 27 Z" fill="url(#gold)"/>
-  <path d="M37 36 C49 34 58 26 57.5 5 C53 17 46 24 36.5 27 Z" fill="url(#gold)"/>
-  <!-- tall, narrow helmet with a pointed crown -->
-  <path d="M32 14 C37.5 18.5 41.5 27 41 37.5 C40.5 46.5 36.2 54 32 59 C27.8 54 23.5 46.5 23 37.5 C22.5 27 26.5 18.5 32 14 Z" fill="url(#metal)" stroke="url(#gold)" stroke-width="2.2" stroke-linejoin="round"/>
-  <!-- center ridge and angled brow -->
-  <path d="M32 17 L32 56" stroke="url(#gold)" stroke-width="1.3" stroke-linecap="round" opacity="0.8"/>
-  <path d="M25 35.5 L32 31.5 L39 35.5" fill="none" stroke="url(#gold)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- void gem -->
-  <path d="M32 21 L34.8 25 L32 29 L29.2 25 Z" fill="#7fd3ff"/>
+  <!-- face: broad under the crest, narrowing to a pointed chin -->
+  <path d="M23.5 25 C22.5 37 26.5 49 32 59 C37.5 49 41.5 37 40.5 25 Z" fill="url(#ivory)" stroke="url(#gold)" stroke-width="2" stroke-linejoin="round"/>
+  <!-- hammerhead crest: flat, a small central peak, tips swept up and back -->
+  <path d="M3 9 C11 16.5 21 17.5 28 15.5 L32 11 L36 15.5 C43 17.5 53 16.5 61 9 C57 21 47 27.5 40 27.5 L24 27.5 C17 27.5 7 21 3 9 Z" fill="url(#ivory)" stroke="url(#gold)" stroke-width="1.6" stroke-linejoin="round"/>
+  <!-- gold inlay along the crest -->
+  <path d="M8.5 15.5 C15 21.5 21 23.5 26 23.5 L38 23.5 C43 23.5 49 21.5 55.5 15.5" fill="none" stroke="url(#gold)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- center ridge, brow and gem -->
+  <path d="M32 30 L32 55" stroke="url(#gold)" stroke-width="1.4" stroke-linecap="round"/>
+  <path d="M26 34 L32 31 L38 34" fill="none" stroke="url(#gold)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32 14.5 L34.8 18.3 L32 22 L29.2 18.3 Z" fill="url(#gold)" stroke="#8a6526" stroke-width="0.6"/>
 </svg>
