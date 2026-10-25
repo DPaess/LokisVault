@@ -34,13 +34,23 @@ const setPrice = (set) => priceOf(`${set} Set`);
 const relicPrice = (relic) => priceOf(`${relic} Relic`);
 const marketUrl = (name) => (PRICES[name]?.slug ? `https://warframe.market/items/${PRICES[name].slug}` : null);
 
-function toast(msg) {
+function toast(msg, undoable = false) {
   document.querySelector('.toast')?.remove();
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
+  if (undoable) {
+    const b = document.createElement('button');
+    b.className = 'small';
+    b.textContent = 'Undo';
+    b.addEventListener('click', () => {
+      el.remove();
+      undo();
+    });
+    el.append(' ', b);
+  }
   document.body.append(el);
-  setTimeout(() => el.remove(), 2400);
+  setTimeout(() => el.remove(), undoable ? 7000 : 2400);
 }
 
 // ---- State -----------------------------------------------------------------
@@ -87,11 +97,26 @@ function writeLocal() {
 }
 
 // Every change goes through here. savedAt lets sync tell which copy is newer.
-function save(msg) {
+function save(msg, undoable = false) {
   state = sanitize({ ...state, savedAt: Date.now() });
   if (!writeLocal()) return;
-  if (msg) toast(msg);
+  if (msg) toast(msg, undoable);
   schedulePush();
+}
+
+// Undo: a copy of the vault is kept before each change that removes or overwrites something.
+// It lives in memory only, so it covers this visit to the site.
+const undoStack = [];
+function checkpoint() {
+  undoStack.push(JSON.stringify(state));
+  if (undoStack.length > 20) undoStack.shift();
+}
+function undo() {
+  const prev = undoStack.pop();
+  if (!prev) return toast('Nothing to undo');
+  state = sanitize(JSON.parse(prev));
+  save('Undone');
+  render();
 }
 
 // ---- Derived inventory -----------------------------------------------------
@@ -299,8 +324,8 @@ function relicCard(name, need) {
     </article>`;
 }
 
-VIEWS.relics = () => {
-  const need = needs();
+// Owned relics passing the Relics tab filters, unsorted.
+function relicsShown(need = needs()) {
   const f = (ui.relics ??= { filter: 'all', era: '', sort: 'ev' });
   const hasWanted = (r) => DATA.relics[r].rewards.some((w) => missingOf(need, w.item) > 0);
   let names = Object.keys(state.relics);
@@ -308,6 +333,13 @@ VIEWS.relics = () => {
   if (f.filter === 'vaulted') names = names.filter((r) => !DATA.relics[r].farmable);
   if (f.era && !Object.keys(state.relics).some((r) => DATA.relics[r].era === f.era)) f.era = '';
   if (f.era) names = names.filter((r) => DATA.relics[r].era === f.era);
+  return names;
+}
+
+VIEWS.relics = () => {
+  const need = needs();
+  const names = relicsShown(need);
+  const f = ui.relics;
   const evOf = (r) => relicEV(r, bestRef(r)).plat;
   const sorters = {
     ev: (a, b) => evOf(b) - evOf(a),
@@ -340,6 +372,7 @@ VIEWS.relics = () => {
       </select>
       <span class="spacer"></span>
       <span class="muted small">${names.length} of ${total} relics shown</span>
+      ${names.length ? `<button class="small danger" data-action="relics-remove-shown">${names.length === total ? `Remove all ${total}` : `Remove these ${names.length}`}</button>` : ''}
     </div>
     ${
       names.length
@@ -360,9 +393,21 @@ FORMS['relic-add'] = (form, fd) => {
   render();
 };
 CHANGES['relic-count'] = (el) => {
+  checkpoint();
   const r = (state.relics[el.dataset.relic] ??= {});
   r[el.dataset.ref] = Math.max(0, Math.floor(Number(el.value) || 0));
-  save();
+  if (relicTotal(el.dataset.relic)) save();
+  else save(`Removed ${el.dataset.relic}`, true);
+  render();
+};
+ACTIONS['relics-remove-shown'] = () => {
+  const names = relicsShown();
+  const f = ui.relics;
+  const what = f.era || f.filter !== 'all' ? `the ${names.length} relics matching your filters` : `all ${names.length} relics`;
+  if (!names.length || !confirm(`Remove ${what} from your vault? You can undo this.`)) return;
+  checkpoint();
+  for (const r of names) delete state.relics[r];
+  save(`Removed ${names.length} relics`, true);
   render();
 };
 CHANGES['relic-filter'] = (el) => {
@@ -378,8 +423,9 @@ CHANGES['relic-sort'] = (el) => {
   render();
 };
 ACTIONS['relic-remove'] = (el) => {
+  checkpoint();
   delete state.relics[el.dataset.relic];
-  save(`Removed ${el.dataset.relic}`);
+  save(`Removed ${el.dataset.relic}`, true);
   render();
 };
 
@@ -401,11 +447,23 @@ function resolvePart(text) {
 const partSets = (p) => DATA.parts[p]?.sets ?? [];
 const partSortKey = (p) => `${partSets(p)[0] ?? '~'}|${p}`;
 
+// A part's type is the category of its set (Warframe, Primary, Melee...).
+const partType = (p) => DATA.sets[partSets(p)[0]]?.category ?? 'Other';
+function partsShown() {
+  const f = (ui.parts ??= { type: '' });
+  const all = Object.keys(state.parts);
+  if (f.type && !all.some((p) => partType(p) === f.type)) f.type = '';
+  return all.filter((p) => !f.type || partType(p) === f.type).sort((a, b) => partSortKey(a).localeCompare(partSortKey(b)));
+}
+
 VIEWS.parts = () => {
   const need = needs();
-  const names = Object.keys(state.parts).sort((a, b) => partSortKey(a).localeCompare(partSortKey(b)));
+  const names = partsShown();
+  const f = ui.parts;
+  const types = [...new Set(Object.keys(state.parts).map(partType))].sort();
+  const total = Object.keys(state.parts).length;
   const buildable = Object.keys(DATA.sets).filter(setComplete);
-  const pg = page('parts', names);
+  const pg = page('parts', names, f);
   const rows = pg.items.map((p) => {
     const n = need[p] ?? 0;
     const status = n ? (owned(p) >= n ? '<span class="ok">✓</span>' : `<span class="miss">${missingOf(need, p)} short</span>`) : '';
@@ -425,6 +483,18 @@ VIEWS.parts = () => {
       <input type="number" name="qty" min="1" value="1" aria-label="Quantity">
       <button class="primary">Add</button>
     </form>
+    ${
+      total
+        ? `<div class="toolbar">
+             <select data-change="parts-type" aria-label="Type"><option value="">All types</option>${types
+               .map((t) => `<option value="${esc(t)}"${f.type === t ? ' selected' : ''}>${esc(t)} (${Object.keys(state.parts).filter((p) => partType(p) === t).length})</option>`)
+               .join('')}</select>
+             <span class="spacer"></span>
+             <span class="muted small">${names.length} of ${total} kinds shown</span>
+             <button class="small danger" data-action="parts-remove-shown">${names.length === total ? `Remove all ${total}` : `Remove these ${names.length}`}</button>
+           </div>`
+        : ''
+    }
     ${
       buildable.length
         ? `<div class="panel" style="margin-bottom:14px"><h3>You can build right now</h3>
@@ -454,8 +524,23 @@ FORMS['part-add'] = (form, fd) => {
   render();
 };
 CHANGES['part-count'] = (el) => {
+  checkpoint();
   state.parts[el.dataset.part] = Math.max(0, Math.floor(Number(el.value) || 0));
-  save();
+  if (state.parts[el.dataset.part]) save();
+  else save(`Removed ${el.dataset.part}`, true);
+  render();
+};
+CHANGES['parts-type'] = (el) => {
+  ui.parts.type = el.value;
+  render();
+};
+ACTIONS['parts-remove-shown'] = () => {
+  const names = partsShown();
+  const what = ui.parts.type ? `the ${names.length} ${ui.parts.type} part kinds` : `all ${names.length} part kinds`;
+  if (!names.length || !confirm(`Remove ${what} from your vault? You can undo this.`)) return;
+  checkpoint();
+  for (const p of names) delete state.parts[p];
+  save(`Removed ${names.length} part kinds`, true);
   render();
 };
 
@@ -579,6 +664,7 @@ VIEWS.wishlist = () => {
              <select data-change="wish-filter" data-key="source" aria-label="Source">${opt('', 'Any source', f.source)}${opt('open', 'Not vaulted', f.source)}${opt('vaulted', 'Vaulted', f.source)}${opt('mine', 'Missing parts in my relics', f.source)}</select>
              <select data-change="wish-filter" data-key="sort" aria-label="Sort">${opt('name', 'Sort by name', f.sort)}${opt('progress', 'Closest to done', f.sort)}${opt('missing', 'Fewest missing parts', f.sort)}${opt('price', 'Set price', f.sort)}</select>
              <span class="muted small">${sets.length} of ${state.wishlist.length} sets shown</span>
+             ${sets.length ? `<button class="small danger" data-action="wish-remove-shown" data-sets="${esc(JSON.stringify(sets))}">${sets.length === state.wishlist.length ? `Remove all ${sets.length}` : `Remove these ${sets.length}`}</button>` : ''}
            </div>`
         : ''
     }
@@ -614,18 +700,28 @@ FORMS['wish-add'] = (form, fd) => {
 };
 ACTIONS['wish-add'] = (el) => addToWishlist(el.dataset.set);
 ACTIONS['wish-remove'] = (el) => {
+  checkpoint();
   state.wishlist = state.wishlist.filter((s) => s !== el.dataset.set);
-  save(`Removed ${el.dataset.set} from your wishlist`);
+  save(`Removed ${el.dataset.set} from your wishlist`, true);
+  render();
+};
+ACTIONS['wish-remove-shown'] = (el) => {
+  const sets = JSON.parse(el.dataset.sets);
+  if (!confirm(`Remove ${sets.length} set${sets.length === 1 ? '' : 's'} from your wishlist? You can undo this.`)) return;
+  checkpoint();
+  state.wishlist = state.wishlist.filter((s) => !sets.includes(s));
+  save(`Removed ${sets.length} sets from your wishlist`, true);
   render();
 };
 ACTIONS['wish-built'] = (el) => {
   const set = el.dataset.set;
   const s = DATA.sets[set];
   if (!confirm(`Mark ${set} as built? Its parts you own are removed from your inventory and it is marked as mastered.`)) return;
+  checkpoint();
   for (const p of s.parts) state.parts[p.name] = Math.max(0, owned(p.name) - p.count);
   state.wishlist = state.wishlist.filter((x) => x !== set);
   state.mastered[s.id] = true;
-  save(`${set} built and marked as mastered`);
+  save(`${set} built and marked as mastered`, true);
   render();
 };
 
@@ -704,6 +800,7 @@ CHANGES['mastery-filter'] = (el) => {
   render();
 };
 CHANGES['mastery-toggle'] = (el) => {
+  checkpoint();
   if (el.checked) state.mastered[el.dataset.id] = true;
   else delete state.mastered[el.dataset.id];
   save();
@@ -713,11 +810,12 @@ ACTIONS['mastery-bulk'] = (el) => {
   const shown = masteryShown();
   const on = el.dataset.value === '1';
   if (!confirm(`${on ? 'Mark' : 'Unmark'} all ${shown.length} items matching your filters as ${on ? '' : 'not '}mastered? This includes the ones not on screen yet.`)) return;
+  checkpoint();
   for (const m of shown) {
     if (on) state.mastered[m.id] = true;
     else delete state.mastered[m.id];
   }
-  save(`${shown.length} items ${on ? 'marked' : 'unmarked'}`);
+  save(`${shown.length} items ${on ? 'marked' : 'unmarked'}`, true);
   render();
 };
 
@@ -1123,6 +1221,7 @@ CHANGES['shot-name'] = (el) => {
 };
 ACTIONS['shots-add'] = () => {
   const take = ui.shots.rows.filter((r) => r.on && r.ok);
+  checkpoint();
   for (const r of take) {
     if (r.kind === 'mastery') {
       for (const m of masteryItems()) if (m.name === r.name) state.mastered[m.id] = true;
@@ -1133,7 +1232,7 @@ ACTIONS['shots-add'] = () => {
   }
   ui.shots.rows = ui.shots.rows.filter((r) => !(r.on && r.ok));
   if (!ui.shots.rows.length) Object.assign(ui.shots, { unread: [], greyed: 0 });
-  save(`Added ${take.length} item${take.length === 1 ? '' : 's'} from screenshots`);
+  save(`Added ${take.length} item${take.length === 1 ? '' : 's'} from screenshots`, true);
   render();
 };
 ACTIONS['shots-clear'] = () => {
@@ -1212,9 +1311,10 @@ VIEWS.data = () => {
 FORMS.bulk = (form, fd) => {
   const mode = fd.get('mode');
   const text = String(fd.get('text') ?? '');
+  checkpoint();
   const report = bulkApply(text, mode);
   ui.bulk = { mode, text: report.unmatched.join('\n'), report };
-  save(`Added ${report.matched.length} line${report.matched.length === 1 ? '' : 's'}`);
+  save(`Added ${report.matched.length} line${report.matched.length === 1 ? '' : 's'}`, true);
   render();
 };
 CHANGES['bulk-mode'] = (el) => {
@@ -1239,8 +1339,9 @@ CHANGES.import = async (el) => {
     const raw = JSON.parse(await file.text());
     if (!raw || typeof raw !== 'object' || raw.v !== 1) throw new Error('not a Loki’s Vault backup');
     if (!confirm('Replace everything in this browser with this backup?')) return;
+    checkpoint();
     state = sanitize(raw);
-    save('Backup imported');
+    save('Backup imported', true);
     render();
   } catch (err) {
     toast(`Import failed: ${err.message}`);
@@ -1249,8 +1350,9 @@ CHANGES.import = async (el) => {
 ACTIONS.reset = () => {
   const where = sync?.token ? 'in this browser and, through sync, on your other devices' : 'in this browser';
   if (!confirm(`Delete every relic, part, wishlist set and mastery mark stored ${where}? Export a backup first if unsure.`)) return;
+  checkpoint();
   state = emptyState();
-  save('Vault reset');
+  save('Vault reset', true);
   render();
 };
 
@@ -1531,6 +1633,13 @@ view.addEventListener('input', (e) => {
   if (!el || !INPUTS[el.dataset.input]) return;
   clearTimeout(inputTimer);
   inputTimer = setTimeout(() => INPUTS[el.dataset.input](el), 150);
+});
+// Ctrl+Z (Cmd+Z) undoes the last change, unless you are typing in a field.
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== 'z') return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+  e.preventDefault();
+  undo();
 });
 window.addEventListener('hashchange', () => {
   render();

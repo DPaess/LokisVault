@@ -206,3 +206,4 @@ details.expand .where b { color: var(--text); font-weight: 500; }
 [data-more] > button { justify-self: start; }
 .warn { color: var(--warn); }
 .badge.check { color: var(--warn); background: rgba(240, 180, 90, 0.14); margin-left: 4px; }
+.toast button { margin-left: 10px; }
