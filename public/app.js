@@ -353,8 +353,11 @@ VIEWS.relics = () => {
     ev: (a, b) => evOf(b) - evOf(a),
     name: (a, b) => eraRank(DATA.relics[a].era) - eraRank(DATA.relics[b].era) || a.localeCompare(b, 'en', { numeric: true }),
     count: (a, b) => relicTotal(b) - relicTotal(a),
+    price: (a, b) => (relicPrice(b) ?? -1) - (relicPrice(a) ?? -1),
+    wanted: (a, b) => wantedIn(b) - wantedIn(a) || evOf(b) - evOf(a),
   };
-  names.sort(sorters[f.sort] ?? sorters.ev);
+  const wantedIn = (r) => DATA.relics[r].rewards.filter((w) => missingOf(need, w.item) > 0).length;
+  names.sort((a, b) => (sorters[f.sort] ?? sorters.ev)(a, b) || a.localeCompare(b, 'en', { numeric: true }));
   const total = Object.keys(state.relics).length;
   const eras = [...new Set(Object.keys(state.relics).map((r) => DATA.relics[r].era))].sort((a, b) => eraRank(a) - eraRank(b));
   const eraCount = (era) => sum(Object.keys(state.relics).filter((r) => DATA.relics[r].era === era).map(relicTotal));
@@ -377,7 +380,7 @@ VIEWS.relics = () => {
         ${eras.map((e) => `<option value="${esc(e)}"${f.era === e ? ' selected' : ''}>${esc(e)} (${eraCount(e)})</option>`).join('')}
       </select>
       <select data-change="relic-sort" aria-label="Sort">
-        ${[['ev', 'Sort by EV'], ['name', 'Sort by name'], ['count', 'Sort by count']].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
+        ${[['ev', 'Sort by EV'], ['price', 'Relic price'], ['wanted', 'Most wanted parts'], ['count', 'Sort by count'], ['name', 'Sort by name']].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
       </select>
       <span class="spacer"></span>
       <span class="muted small">${names.length} of ${total} relics shown</span>
@@ -463,13 +466,23 @@ const partSortKey = (p) => `${partSets(p)[0] ?? '~'}|${p}`;
 // A part's type is the category of its set (Warframe, Primary, Melee...).
 const partType = (p) => DATA.sets[partSets(p)[0]]?.category ?? 'Other';
 function partsShown() {
-  const f = (ui.parts ??= { q: '', type: '' });
+  const f = (ui.parts ??= { q: '', type: '', sort: 'set' });
   const q = norm(f.q);
   const all = Object.keys(state.parts);
   if (f.type && !all.some((p) => partType(p) === f.type)) f.type = '';
   return all
-    .filter((p) => (!f.type || partType(p) === f.type) && (!q || norm(p).includes(q) || partSets(p).some((s) => norm(s).includes(q)))).sort((a, b) => partSortKey(a).localeCompare(partSortKey(b)));
+    .filter((p) => (!f.type || partType(p) === f.type) && (!q || norm(p).includes(q) || partSets(p).some((s) => norm(s).includes(q))))
+    .sort((a, b) => (PART_SORTS[f.sort] ?? PART_SORTS.set)(a, b) || a.localeCompare(b));
 }
+const PART_SORTS = {
+  set: (a, b) => partSortKey(a).localeCompare(partSortKey(b)),
+  name: (a, b) => a.localeCompare(b),
+  owned: (a, b) => owned(b) - owned(a),
+  needed: (a, b) => (needs()[b] ?? 0) - (needs()[a] ?? 0),
+  ducats: (a, b) => (DATA.parts[b]?.ducats ?? 0) - (DATA.parts[a]?.ducats ?? 0),
+  price: (a, b) => (priceOf(b) ?? -1) - (priceOf(a) ?? -1),
+  stack: (a, b) => (priceOf(b) ?? 0) * owned(b) - (priceOf(a) ?? 0) * owned(a),
+};
 
 VIEWS.parts = () => {
   const need = needs();
@@ -503,6 +516,9 @@ VIEWS.parts = () => {
       total
         ? `<div class="toolbar">
              <input class="grow" type="search" placeholder="Search your parts or sets" value="${esc(f.q ?? '')}" data-input="parts-q" data-focus="parts-q">
+             <select data-change="parts-sort" aria-label="Sort">${[['set', 'Sort by set'], ['name', 'Name'], ['price', 'Price'], ['stack', 'Stack value'], ['ducats', 'Ducats'], ['owned', 'Owned'], ['needed', 'Needed']]
+               .map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`)
+               .join('')}</select>
              <select data-change="parts-type" aria-label="Type"><option value="">All types</option>${types
                .map((t) => `<option value="${esc(t)}"${f.type === t ? ' selected' : ''}>${esc(t)} (${Object.keys(state.parts).filter((p) => partType(p) === t).length})</option>`)
                .join('')}</select>
@@ -549,6 +565,10 @@ CHANGES['part-count'] = (el) => {
 };
 INPUTS['parts-q'] = (el) => {
   ui.parts.q = el.value;
+  render();
+};
+CHANGES['parts-sort'] = (el) => {
+  ui.parts.sort = el.value;
   render();
 };
 CHANGES['parts-type'] = (el) => {
@@ -638,6 +658,8 @@ function wishCard(set, need) {
 
 // Parts of a set still missing, against this set's own counts.
 const setMissing = (set) => DATA.sets[set].parts.filter((p) => owned(p.name) < p.count);
+// Plat to buy every part of a set you are still missing, at market prices (unknown prices count as 0).
+const toFinish = (set) => sum(setMissing(set).map((p) => (priceOf(p.name) ?? 0) * (p.count - Math.min(owned(p.name), p.count))));
 const setProgress = (set) => {
   const parts = DATA.sets[set].parts;
   const total = sum(parts.map((p) => p.count));
@@ -665,6 +687,7 @@ VIEWS.wishlist = () => {
     name: (a, b) => a.localeCompare(b),
     progress: (a, b) => setProgress(b) - setProgress(a) || a.localeCompare(b),
     missing: (a, b) => setMissing(a).length - setMissing(b).length || a.localeCompare(b),
+    cost: (a, b) => toFinish(a) - toFinish(b) || a.localeCompare(b),
     price: (a, b) => (setPrice(b) ?? -1) - (setPrice(a) ?? -1) || a.localeCompare(b),
   };
   sets.sort(sorters[f.sort] ?? sorters.name);
@@ -683,7 +706,7 @@ VIEWS.wishlist = () => {
              <select data-change="wish-filter" data-key="category" aria-label="Category">${opt('', 'All categories', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select>
              <select data-change="wish-filter" data-key="status" aria-label="Status">${opt('', 'Any progress', f.status)}${opt('ready', 'Ready to build', f.status)}${opt('missing', 'Missing parts', f.status)}</select>
              <select data-change="wish-filter" data-key="source" aria-label="Source">${opt('', 'Any source', f.source)}${opt('open', 'Not vaulted', f.source)}${opt('vaulted', 'Vaulted', f.source)}${opt('mine', 'Missing parts in my relics', f.source)}</select>
-             <select data-change="wish-filter" data-key="sort" aria-label="Sort">${opt('name', 'Sort by name', f.sort)}${opt('progress', 'Closest to done', f.sort)}${opt('missing', 'Fewest missing parts', f.sort)}${opt('price', 'Set price', f.sort)}</select>
+             <select data-change="wish-filter" data-key="sort" aria-label="Sort">${opt('name', 'Sort by name', f.sort)}${opt('progress', 'Closest to done', f.sort)}${opt('missing', 'Fewest missing parts', f.sort)}${opt('price', 'Set price', f.sort)}${opt('cost', 'Cheapest to finish', f.sort)}</select>
              <span class="muted small">${sets.length} of ${state.wishlist.length} sets shown</span>
              ${sets.length ? `<button class="small danger" data-action="wish-remove-shown" data-sets="${esc(JSON.stringify(sets))}">${sets.length === state.wishlist.length ? `Remove all ${sets.length}` : `Remove these ${sets.length}`}</button>` : ''}
            </div>`
@@ -749,15 +772,23 @@ ACTIONS['wish-built'] = (el) => {
 // ---- Mastery -------------------------------------------------------------------
 
 function masteryShown() {
-  const f = (ui.mastery ??= { q: '', category: '', prime: '', status: 'todo' });
+  const f = (ui.mastery ??= { q: '', category: '', prime: '', status: 'todo', sort: 'name' });
   const q = norm(f.q);
-  return masteryItems().filter(
-    (m) =>
-      (!q || norm(m.name).includes(q)) &&
-      (!f.category || m.category === f.category) &&
-      (!f.prime || (f.prime === 'prime') === m.prime) &&
-      (!f.status || (f.status === 'done') === Boolean(state.mastered[m.id])),
-  );
+  const sorters = {
+    name: (a, b) => a.name.localeCompare(b.name),
+    xp: (a, b) => b.xp - a.xp,
+    mr: (a, b) => (b.mr ?? 0) - (a.mr ?? 0),
+    category: (a, b) => a.category.localeCompare(b.category),
+  };
+  return masteryItems()
+    .filter(
+      (m) =>
+        (!q || norm(m.name).includes(q)) &&
+        (!f.category || m.category === f.category) &&
+        (!f.prime || (f.prime === 'prime') === m.prime) &&
+        (!f.status || (f.status === 'done') === Boolean(state.mastered[m.id])),
+    )
+    .sort((a, b) => (sorters[f.sort] ?? sorters.name)(a, b) || a.name.localeCompare(b.name));
 }
 
 VIEWS.mastery = () => {
@@ -793,6 +824,7 @@ VIEWS.mastery = () => {
       <select data-change="mastery-filter" data-key="category" aria-label="Category">${opt('', 'All categories', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select>
       <select data-change="mastery-filter" data-key="prime" aria-label="Prime">${opt('', 'Prime and non prime', f.prime)}${opt('prime', 'Prime only', f.prime)}${opt('normal', 'Non prime only', f.prime)}</select>
       <select data-change="mastery-filter" data-key="status" aria-label="Status">${opt('todo', 'Not mastered', f.status)}${opt('done', 'Mastered', f.status)}${opt('', 'Any status', f.status)}</select>
+      <select data-change="mastery-filter" data-key="sort" aria-label="Sort">${opt('name', 'Sort by name', f.sort ?? 'name')}${opt('xp', 'Mastery points', f.sort)}${opt('mr', 'MR requirement', f.sort)}${opt('category', 'Category', f.sort)}</select>
     </div>
     <div class="toolbar">
       <span class="muted small">${shown.length} match, ${fmtNum(masteryXp(shown.filter((m) => !state.mastered[m.id])))} points still to earn among them</span>
