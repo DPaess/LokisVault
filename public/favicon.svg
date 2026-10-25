@@ -25,7 +25,12 @@
            C24 48 22.5 41 22.5 31.5
            C19.5 29 15.5 29.5 10.5 32
            C6.5 34 3 32.5 2.5 28 Z"
-        fill="url(#ivory)" stroke="url(#gold)" stroke-width="2" stroke-linejoin="round"/>
-  <!-- gem -->
-  <path d="M32 17 L34.8 21 L32 25 L29.2 21 Z" fill="url(#gold)" stroke="#8a6526" stroke-width="0.6"/>
+        fill="url(#ivory)" stroke="url(#gold)" stroke-width="3.2" stroke-linejoin="round"/>
+  <!-- gold filigree: a curl inside each lobe and a teardrop down the body -->
+  <g fill="none" stroke="#c9a14f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 19.5 C10.5 19.8 6.8 22.3 6.8 26.2 C6.8 29 9.2 30.4 12 29.4 C13.8 28.7 14.2 26.6 12.6 25.8"/>
+    <path d="M48 19.5 C53.5 19.8 57.2 22.3 57.2 26.2 C57.2 29 54.8 30.4 52 29.4 C50.2 28.7 49.8 26.6 51.4 25.8"/>
+    <path d="M32 21 C35.2 26 36.2 33 32 44 C27.8 33 28.8 26 32 21 Z"/>
+    <path d="M32 47.5 L32 51.5"/>
+  </g>
 </svg>
