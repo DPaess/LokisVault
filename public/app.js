@@ -472,9 +472,40 @@ function wishCard(set, need) {
     </article>`;
 }
 
+// Parts of a set still missing, against this set's own counts.
+const setMissing = (set) => DATA.sets[set].parts.filter((p) => owned(p.name) < p.count);
+const setProgress = (set) => {
+  const parts = DATA.sets[set].parts;
+  const total = sum(parts.map((p) => p.count));
+  return total ? sum(parts.map((p) => Math.min(owned(p.name), p.count))) / total : 0;
+};
+
 VIEWS.wishlist = () => {
   const need = needs();
-  const sets = [...state.wishlist].sort((a, b) => a.localeCompare(b));
+  const f = (ui.wish ??= { q: '', category: '', status: '', source: '', sort: 'name' });
+  const q = norm(f.q);
+  const inMyRelics = (set) => setMissing(set).some((p) => (DATA.parts[p.name]?.relics ?? []).some((r) => relicTotal(r) > 0));
+  const sources = {
+    open: (set) => !DATA.sets[set].vaulted,
+    vaulted: (set) => DATA.sets[set].vaulted,
+    mine: inMyRelics,
+  };
+  const sets = state.wishlist.filter(
+    (set) =>
+      (!q || norm(set).includes(q)) &&
+      (!f.category || DATA.sets[set].category === f.category) &&
+      (!f.status || (f.status === 'ready') === setComplete(set)) &&
+      (!f.source || sources[f.source](set)),
+  );
+  const sorters = {
+    name: (a, b) => a.localeCompare(b),
+    progress: (a, b) => setProgress(b) - setProgress(a) || a.localeCompare(b),
+    missing: (a, b) => setMissing(a).length - setMissing(b).length || a.localeCompare(b),
+    price: (a, b) => (setPrice(b) ?? -1) - (setPrice(a) ?? -1) || a.localeCompare(b),
+  };
+  sets.sort(sorters[f.sort] ?? sorters.name);
+  const categories = [...new Set(state.wishlist.map((s) => DATA.sets[s].category))].sort();
+  const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
   return `
     ${head('Wishlist', 'Prime sets you want to build. Missing parts show which of your relics can drop them, which relics you can farm today, or where to buy them if everything is vaulted.')}
     <form class="toolbar" data-form="wish-add">
@@ -482,10 +513,33 @@ VIEWS.wishlist = () => {
       <button class="primary">Add</button>
     </form>
     ${
+      state.wishlist.length
+        ? `<div class="toolbar">
+             <input class="grow" type="search" placeholder="Search your wishlist" value="${esc(f.q)}" data-input="wish-q" data-focus="wish-q">
+             <select data-change="wish-filter" data-key="category" aria-label="Category">${opt('', 'All categories', f.category)}${categories.map((c) => opt(c, c, f.category)).join('')}</select>
+             <select data-change="wish-filter" data-key="status" aria-label="Status">${opt('', 'Any progress', f.status)}${opt('ready', 'Ready to build', f.status)}${opt('missing', 'Missing parts', f.status)}</select>
+             <select data-change="wish-filter" data-key="source" aria-label="Source">${opt('', 'Any source', f.source)}${opt('open', 'Not vaulted', f.source)}${opt('vaulted', 'Vaulted', f.source)}${opt('mine', 'Missing parts in my relics', f.source)}</select>
+             <select data-change="wish-filter" data-key="sort" aria-label="Sort">${opt('name', 'Sort by name', f.sort)}${opt('progress', 'Closest to done', f.sort)}${opt('missing', 'Fewest missing parts', f.sort)}${opt('price', 'Set price', f.sort)}</select>
+             <span class="muted small">${sets.length} of ${state.wishlist.length} sets shown</span>
+           </div>`
+        : ''
+    }
+    ${
       sets.length
         ? `<div class="grid cards">${sets.map((s) => wishCard(s, need)).join('')}</div>`
-        : '<div class="empty">Your wishlist is empty. Add a set above, or use “Add to wishlist” on an unmastered prime in Mastery.</div>'
+        : state.wishlist.length
+          ? '<div class="empty">No set on your wishlist matches these filters.</div>'
+          : '<div class="empty">Your wishlist is empty. Add a set above, or use “Add to wishlist” on an unmastered prime in Mastery.</div>'
     }`;
+};
+
+INPUTS['wish-q'] = (el) => {
+  ui.wish.q = el.value;
+  render();
+};
+CHANGES['wish-filter'] = (el) => {
+  ui.wish[el.dataset.key] = el.value;
+  render();
 };
 
 function addToWishlist(set) {
