@@ -1,0 +1,17 @@
+{
+  "name": "lokisvault",
+  "version": "0.1.0",
+  "description": "Warframe relic, prime part, wishlist and mastery planner with warframe.market sell or ducat advice",
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "fetch:prices": "node scripts/fetch-prices.mjs",
+    "serve": "npx --yes http-server public -p 8080 -c-1"
+  },
+  "author": "DPaess",
+  "license": "MIT",
+  "dependencies": {
+    "@wfcd/items": "^1.1276.34"
+  },
+  "private": true,
+  "type": "module"
+}
