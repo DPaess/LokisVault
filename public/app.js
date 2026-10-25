@@ -955,7 +955,7 @@ function spareSets(need) {
 
 VIEWS.trade = () => {
   const need = needs();
-  const f = (ui.trade ??= { q: '', verdict: '', type: '', sort: 'verdict' });
+  const f = (ui.trade ??= { q: '', verdict: '', type: '', sort: 'verdict', dir: 'asc' });
   const q = norm(f.q);
   const spares = Object.keys(state.parts)
     .map((p) => ({ p, n: spareOf(need, p), price: priceOf(p), buy: priceEntry(p)?.buy ?? null, ducats: DATA.parts[p]?.ducats ?? 0, v: verdictFor(p) }))
@@ -967,15 +967,20 @@ VIEWS.trade = () => {
       (!f.type || partType(r.p) === f.type),
   );
   const order = { sell: 0, ducat: 1, hold: 2 };
+  // Ascending comparisons per column; the header click picks the column and flips the direction.
   const sorters = {
+    part: (a, b) => a.p.localeCompare(b.p),
+    spare: (a, b) => a.n - b.n,
+    price: (a, b) => (a.price ?? -1) - (b.price ?? -1),
+    buy: (a, b) => (a.buy ?? -1) - (b.buy ?? -1),
+    ducats: (a, b) => a.ducats - b.ducats,
+    ratio: (a, b) => (a.v.ratio ?? -1) - (b.v.ratio ?? -1),
     verdict: (a, b) => order[a.v.key] - order[b.v.key] || (b.price ?? 0) * b.n - (a.price ?? 0) * a.n,
-    stack: (a, b) => (b.price ?? 0) * b.n - (a.price ?? 0) * a.n,
-    price: (a, b) => (b.price ?? -1) - (a.price ?? -1),
-    ratio: (a, b) => (b.v.ratio ?? -1) - (a.v.ratio ?? -1),
-    spare: (a, b) => b.n - a.n,
-    name: () => 0,
+    stack: (a, b) => (a.price ?? 0) * a.n - (b.price ?? 0) * b.n,
   };
-  rows.sort((a, b) => (sorters[f.sort] ?? sorters.verdict)(a, b) || a.p.localeCompare(b.p));
+  const sign = f.dir === 'desc' ? -1 : 1;
+  rows.sort((a, b) => sign * (sorters[f.sort] ?? sorters.verdict)(a, b) || a.p.localeCompare(b.p));
+  const th = (key, label, cls = '') => sortHeader('trade', f, key, label, cls);
   const filtered = rows.length !== spares.length;
   const sellPile = rows.filter((r) => r.v.key === 'sell');
   const ducatPile = rows.filter((r) => r.v.key === 'ducat');
@@ -997,7 +1002,6 @@ VIEWS.trade = () => {
              <input class="grow" type="search" placeholder="Search spare parts or sets" value="${esc(f.q)}" data-input="trade-q" data-focus="trade-q">
              <select data-change="trade-filter" data-key="verdict" aria-label="Verdict">${opt('', 'Any verdict', f.verdict)}${opt('sell', 'Sell', f.verdict)}${opt('ducat', 'Ducats', f.verdict)}${opt('hold', 'Hold (no price)', f.verdict)}</select>
              <select data-change="trade-filter" data-key="type" aria-label="Type">${opt('', 'All types', f.type)}${types.map((t) => opt(t, t, f.type)).join('')}</select>
-             <select data-change="trade-filter" data-key="sort" aria-label="Sort">${opt('verdict', 'Sort by verdict', f.sort)}${opt('stack', 'Stack value', f.sort)}${opt('price', 'Price', f.sort)}${opt('ratio', 'Ducats per plat', f.sort)}${opt('spare', 'Spare count', f.sort)}${opt('name', 'Name', f.sort)}</select>
              <span class="muted small">${rows.length} of ${spares.length} shown</span>
            </div>`
         : ''
@@ -1005,7 +1009,7 @@ VIEWS.trade = () => {
     ${
       rows.length
         ? `<div class="table-wrap"><table>
-            <thead><tr><th>Part</th><th class="num">Spare</th><th class="num">Price</th><th class="num">Best buy</th><th class="num">Ducats</th><th class="num">D / p</th><th>Verdict</th><th class="num">Stack</th><th></th></tr></thead>
+            <thead><tr>${th('part', 'Part')}${th('spare', 'Spare', 'num')}${th('price', 'Price', 'num')}${th('buy', 'Best buy', 'num')}${th('ducats', 'Ducats', 'num')}${th('ratio', 'D / p', 'num')}${th('verdict', 'Verdict')}${th('stack', 'Stack', 'num')}<th></th></tr></thead>
             <tbody>${pg.items
               .map(
                 (r) => `<tr>
@@ -1042,6 +1046,19 @@ VIEWS.trade = () => {
     }`;
 };
 
+// A table header that sorts by its column: click to sort, click again to reverse.
+// Text columns and Verdict start A to Z (Sell first), number columns start with the biggest.
+function sortHeader(table, f, key, label, cls = '') {
+  const on = f.sort === key;
+  const arrow = on ? (f.dir === 'desc' ? ' ▼' : ' ▲') : '';
+  return `<th class="sortable${cls ? ` ${cls}` : ''}${on ? ' sorted' : ''}" data-action="th-sort" data-table="${table}" data-key="${key}" data-start="${cls === 'num' ? 'desc' : 'asc'}" title="Sort by ${esc(label)}">${esc(label)}${arrow}</th>`;
+}
+ACTIONS['th-sort'] = (el) => {
+  const f = ui[el.dataset.table];
+  if (f.sort === el.dataset.key) f.dir = f.dir === 'desc' ? 'asc' : 'desc';
+  else Object.assign(f, { sort: el.dataset.key, dir: el.dataset.start });
+  render();
+};
 INPUTS['trade-q'] = (el) => {
   ui.trade.q = el.value;
   render();
