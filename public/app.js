@@ -302,6 +302,80 @@ ACTIONS['relic-remove'] = (el) => {
   render();
 };
 
+// ---- Prime parts -------------------------------------------------------------
+
+const partIndex = () => (partIndex.map ??= new Map(Object.keys(DATA.parts).map((k) => [norm(k), k])));
+
+// Case insensitive, accepts a missing trailing "Blueprint" and a unique prefix.
+function resolvePart(text) {
+  const t = norm(text);
+  if (!t) return null;
+  const idx = partIndex();
+  if (idx.has(t)) return idx.get(t);
+  if (idx.has(`${t} blueprint`)) return idx.get(`${t} blueprint`);
+  const hits = [...idx.keys()].filter((k) => k.startsWith(`${t} `) || k.startsWith(t));
+  return hits.length === 1 ? idx.get(hits[0]) : null;
+}
+
+const partSets = (p) => DATA.parts[p]?.sets ?? [];
+const partSortKey = (p) => `${partSets(p)[0] ?? '~'}|${p}`;
+
+VIEWS.parts = () => {
+  const need = needs();
+  const names = Object.keys(state.parts).sort((a, b) => partSortKey(a).localeCompare(partSortKey(b)));
+  const buildable = Object.keys(DATA.sets).filter(setComplete);
+  const rows = names.map((p) => {
+    const n = need[p] ?? 0;
+    const status = n ? (owned(p) >= n ? '<span class="ok">✓</span>' : `<span class="miss">${missingOf(need, p)} short</span>`) : '';
+    return `<tr>
+      <td>${esc(p)}</td>
+      <td class="muted">${partSets(p).map(esc).join(', ') || '–'}</td>
+      <td class="num"><input type="number" min="0" value="${owned(p)}" data-change="part-count" data-part="${esc(p)}" data-focus="part:${esc(p)}" aria-label="Owned"></td>
+      <td class="num">${n || ''} ${status}</td>
+      <td class="num">${fmtD(DATA.parts[p].ducats)}</td>
+      <td class="num">${fmtP(priceOf(p))}</td>
+    </tr>`;
+  });
+  return `
+    ${head('Prime parts', 'Parts sitting in your inventory. Names match the game, so “Loki Prime Chassis” finds “Loki Prime Chassis Blueprint”. Set an amount to 0 to remove it.')}
+    <form class="toolbar" data-form="part-add">
+      <input class="grow" name="name" list="dl-parts" placeholder="Part, e.g. Loki Prime Chassis Blueprint" autocomplete="off" data-focus="part-add" required>
+      <input type="number" name="qty" min="1" value="1" aria-label="Quantity">
+      <button class="primary">Add</button>
+    </form>
+    ${
+      buildable.length
+        ? `<div class="panel" style="margin-bottom:14px"><h3>You can build right now</h3>
+           <div class="row" style="margin-top:8px">${buildable
+             .map((s) => `<span class="badge gold">${esc(s)}${state.mastered[DATA.sets[s].id] ? ' · mastered' : ''}</span>`)
+             .join('')}</div></div>`
+        : ''
+    }
+    ${
+      names.length
+        ? `<div class="table-wrap"><table>
+             <thead><tr><th>Part</th><th>Set</th><th class="num">Owned</th><th class="num">Needed</th><th class="num">Ducats</th><th class="num">Price</th></tr></thead>
+             <tbody>${rows.join('')}</tbody>
+           </table></div>
+           <p class="small muted">${names.length} kinds, ${sum(names.map(owned))} parts in total.</p>`
+        : '<div class="empty">No prime parts yet. Add one above or bulk paste a list in Data.</div>'
+    }`;
+};
+
+FORMS['part-add'] = (form, fd) => {
+  const name = resolvePart(fd.get('name'));
+  if (!name) return toast(`Unknown or ambiguous part “${fd.get('name')}”`);
+  const qty = Math.max(1, Number(fd.get('qty')) || 1);
+  state.parts[name] = owned(name) + qty;
+  save(`Added ${qty}× ${name}`);
+  render();
+};
+CHANGES['part-count'] = (el) => {
+  state.parts[el.dataset.part] = Math.max(0, Math.floor(Number(el.value) || 0));
+  save();
+  render();
+};
+
 const todo = (title) => () => `${head(title)}<div class="empty">Coming soon.</div>`;
 for (const [tab, title] of Object.entries({ relics: 'Relics', parts: 'Prime parts', wishlist: 'Wishlist', mastery: 'Mastery', trade: 'Sell or ducat', data: 'Data' })) {
   VIEWS[tab] ??= todo(title);
