@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loki's Vault</title>
+  <meta name="description" content="A Warframe planner for players who can't run overlays: track relics, prime parts, wishlist sets and mastery, and decide what to sell for platinum or trade for ducats.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <img src="favicon.svg" alt="" width="34" height="34">
+      <div>
+        <h1>Loki's Vault</h1>
+        <p class="tagline">Nothing to see here. Just every relic you own.</p>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <a href="#overview">Overview</a>
+      <a href="#relics">Relics</a>
+      <a href="#parts">Prime parts</a>
+      <a href="#wishlist">Wishlist</a>
+      <a href="#mastery">Mastery</a>
+      <a href="#trade">Sell or ducat</a>
+      <a href="#data">Data</a>
+    </nav>
+  </header>
+
+  <main id="view" aria-live="polite">
+    <p class="loading">Opening the vault…</p>
+  </main>
+
+  <footer class="foot">
+    <span id="sources"></span>
+    <span>Fan made, not affiliated with Digital Extremes. Your inventory stays in this browser.</span>
+  </footer>
+
+  <datalist id="dl-relics"></datalist>
+  <datalist id="dl-parts"></datalist>
+  <datalist id="dl-sets"></datalist>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
