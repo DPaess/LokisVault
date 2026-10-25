@@ -181,3 +181,16 @@ tr.dim td { opacity: 0.55; }
   h2 { font-size: 22px; }
   .stat .value { font-size: 24px; }
 }
+
+.drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+.drop.over { border-color: var(--gold); background: var(--gold-soft); }
+.table-wrap input[list] { width: 100%; min-width: 180px; }

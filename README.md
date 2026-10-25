@@ -16,20 +16,21 @@ I play Warframe through GeForce Now. The game runs in the cloud, so tools like A
 * **Wishlist**: prime sets you want. Each missing part shows which of your relics drop it, which relics you can farm today, or a warframe.market link when every source is vaulted. Mark a set as built to use up its parts and mark it mastered.
 * **Mastery**: every masterable item with mastered or not, remaining mastery points, filters and bulk marking for a quick first fill.
 * **Sell or ducat**: every spare part with its market price, ducat value and a verdict based on a ducats per plat threshold you choose, plus spare sets worth more sold whole.
-* **Data**: JSON backup and restore, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
+* **Data**: add items from inventory screenshots (text recognition runs in your browser, you review every match before it is added), JSON backup and restore, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
 
 ## Privacy
 
-Your inventory is stored only in your browser (`localStorage`). Nothing is sent anywhere. Use **Data → Export JSON** to keep a backup or move to another device.
+Your inventory is stored only in your browser (`localStorage`). Nothing is sent anywhere. Screenshots you import are read on your device by [Tesseract.js](https://github.com/naptha/tesseract.js) and never uploaded (only the engine and its English model are downloaded from jsDelivr the first time). Use **Data → Export JSON** to keep a backup or move to another device.
 
 ## Is this safe with DE's terms?
 
-Yes. The site never touches the game: no memory reading, no screen capture, no automation. It uses public community data, and market prices are fetched once a day by a GitHub Action that stays under warframe.market's rate limit.
+Yes. The site never touches the game: no memory reading, no screen capture, no automation. The screenshot import only reads image files you saved and chose yourself, after the fact, the same way you would type the names by hand. It uses public community data, and market prices are fetched once a day by a GitHub Action that stays under warframe.market's rate limit.
 
 ## Data sources
 
 * [WFCD/warframe-items](https://github.com/WFCD/warframe-items) (`@wfcd/items`): masterable items, prime sets, components and ducats.
 * [WFCD/warframe-drop-data](https://github.com/WFCD/warframe-drop-data): relic reward tables and current mission drops, from DE's official drop tables.
+* [Tesseract.js](https://github.com/naptha/tesseract.js): in browser text recognition for the screenshot import.
 * [warframe.market](https://warframe.market) API: live sell and buy orders. A price is the median of the five cheapest sellers who are online or in game.
 
 Thanks to the Warframe Community Developers and the warframe.market team.

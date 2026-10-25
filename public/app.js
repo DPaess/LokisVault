@@ -2,6 +2,8 @@
 // Game data comes from data/items.json and data/prices.json (built by scripts/).
 // The player's inventory lives in localStorage under STORE_KEY.
 
+import { readImages, groupTiles, createFuzzy } from './ocr.js';
+
 const STORE_KEY = 'lokisvault:v1';
 const REFS = ['intact', 'exceptional', 'flawless', 'radiant'];
 const REF_LABEL = { intact: 'Intact', exceptional: 'Exceptional', flawless: 'Flawless', radiant: 'Radiant' };
@@ -745,11 +747,202 @@ function bulkApply(text, mode) {
   return { matched, unmatched };
 }
 
+// ---- Screenshots: read item names from images the player saved ----------------
+
+const fuzzyInventory = () =>
+  (fuzzyInventory.fn ??= createFuzzy([
+    ...Object.keys(DATA.relics).flatMap((r) => [
+      { key: norm(r), value: `relic|${r}` },
+      { key: `${norm(r)} relic`, value: `relic|${r}` },
+    ]),
+    ...Object.keys(DATA.parts).flatMap((p) => [
+      { key: norm(p), value: `part|${p}` },
+      ...(p.endsWith(' Blueprint') ? [{ key: norm(p.slice(0, -10)), value: `part|${p}` }] : []),
+    ]),
+  ]));
+const fuzzyRef = createFuzzy(REFS.map((r) => ({ key: r, value: r })));
+
+// Exact match first (same rules as bulk paste), then the closest known name allowing OCR slips.
+function matchReadText(text) {
+  const exact = matchInventoryLine(text);
+  if (exact) return exact;
+  for (const { qty, rest } of quantityReadings(text)) {
+    const hit = fuzzyInventory()(norm(rest));
+    if (hit) {
+      const [kind, name] = hit.split('|');
+      return { kind, name, qty: Math.max(1, qty) };
+    }
+  }
+  return null;
+}
+
+function readTile(tile) {
+  let ref = 'intact';
+  const words = norm(tile.text)
+    .split(' ')
+    .filter((w) => {
+      const r = w.length >= 5 && fuzzyRef(w, 0.25);
+      if (r) ref = r;
+      return !r;
+    });
+  const hit = words.length ? matchReadText(words.join(' ')) : null;
+  if (!hit) return null;
+  return { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? ref : null, qty: tile.qty || hit.qty || 1 };
+}
+
+const shotRowKey = (r) => `${r.kind}|${r.name}|${r.ref ?? ''}`;
+
+async function runShots(files) {
+  const sh = ui.shots;
+  const images = [...files].filter((f) => f.type.startsWith('image/'));
+  if (sh.busy || !images.length) return;
+  Object.assign(sh, { busy: true, progress: 'Loading the text reader…' });
+  render();
+  try {
+    const pages = await readImages(images, (msg) => {
+      sh.progress = msg;
+      const el = document.getElementById('shot-progress');
+      if (el) el.textContent = msg;
+    });
+    // Screenshots taken while scrolling overlap, so an item seen twice counts once, at its highest quantity.
+    const rows = new Map(sh.rows.map((r) => [shotRowKey(r), r]));
+    const unread = new Set(sh.unread);
+    for (const words of pages) {
+      for (const tile of groupTiles(words)) {
+        const hit = readTile(tile);
+        if (!hit) {
+          if (/[a-z]{3}.*[a-z]{3}/i.test(tile.text)) unread.add(tile.text);
+          continue;
+        }
+        const row = { ...hit, read: tile.text, on: true, ok: true };
+        const prev = rows.get(shotRowKey(row));
+        if (!prev || prev.qty < row.qty) rows.set(shotRowKey(row), row);
+      }
+    }
+    sh.rows = [...rows.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, 'en', { numeric: true }));
+    sh.unread = [...unread];
+    toast(`Found ${sh.rows.length} item${sh.rows.length === 1 ? '' : 's'}, check them before adding`);
+  } catch (err) {
+    toast(`Could not read the screenshots: ${err.message}`);
+  } finally {
+    sh.busy = false;
+    render();
+  }
+}
+
+function shotsPanel() {
+  const sh = (ui.shots ??= { busy: false, progress: '', rows: [], unread: [] });
+  const checked = sh.rows.filter((r) => r.on && r.ok).length;
+  const rows = sh.rows.map(
+    (r, i) => `<tr class="${r.on ? '' : 'dim'}">
+      <td><input type="checkbox" ${r.on ? 'checked' : ''} data-change="shot-field" data-field="on" data-i="${i}" aria-label="Add this item"></td>
+      <td><input class="grow" list="dl-inventory" value="${esc(r.name)}" data-change="shot-name" data-i="${i}" data-focus="shot-name:${i}" aria-label="Item">
+        ${r.ok ? '' : '<div class="miss small">Unknown name, pick one from the list</div>'}</td>
+      <td>${
+        r.kind === 'relic'
+          ? `<select data-change="shot-field" data-field="ref" data-i="${i}" aria-label="Refinement">${REFS.map((x) => `<option value="${x}"${r.ref === x ? ' selected' : ''}>${REF_LABEL[x]}</option>`).join('')}</select>`
+          : '<span class="muted small">Part</span>'
+      }</td>
+      <td class="num"><input type="number" min="1" value="${r.qty}" data-change="shot-field" data-field="qty" data-i="${i}" data-focus="shot-qty:${i}" aria-label="Quantity"></td>
+      <td class="muted small hide-sm">${esc(r.read)}</td>
+    </tr>`,
+  );
+  return `
+    <div class="panel">
+      <h3>Add from screenshots</h3>
+      <p class="small muted">Take screenshots of your inventory in game (the GeForce Now overlay or your system's screenshot key both work), then choose them here, drop them on the box or paste one with Ctrl+V.
+        The text is read on your device and the images are never uploaded. Text recognition makes mistakes, so check names and quantities before adding.</p>
+      <div class="drop" data-drop>
+        <button type="button" data-action="shots-pick" ${sh.busy ? 'disabled' : ''}>Choose screenshots</button>
+        <input type="file" accept="image/*" multiple data-change="shots-files" hidden>
+        <span class="small muted">${sh.busy ? `<span id="shot-progress">${esc(sh.progress)}</span>` : 'or drop images here, or paste one'}</span>
+      </div>
+      ${
+        sh.rows.length
+          ? `<div class="table-wrap" style="margin-top:12px"><table>
+               <thead><tr><th></th><th>Item</th><th>Refinement</th><th class="num">Qty</th><th class="hide-sm">Read as</th></tr></thead>
+               <tbody>${rows.join('')}</tbody>
+             </table></div>
+             <div class="toolbar">
+               <button class="primary" data-action="shots-add" ${checked ? '' : 'disabled'}>Add ${checked} checked to vault</button>
+               <button class="ghost" data-action="shots-clear">Discard</button>
+               <span class="spacer"></span>
+               <span class="small muted">Quantities are added to what you already have.</span>
+             </div>`
+          : ''
+      }
+      ${
+        sh.unread.length
+          ? `<details><summary class="small muted">${sh.unread.length} bits of text not recognised as an item</summary>
+               <div class="small muted">${sh.unread.map(esc).join('<br>')}</div>
+               <p class="small muted">If one of these is an item, add it by hand or fix it in Bulk paste below.</p></details>`
+          : ''
+      }
+    </div>`;
+}
+
+ACTIONS['shots-pick'] = () => view.querySelector('input[data-change=shots-files]')?.click();
+CHANGES['shots-files'] = (el) => runShots(el.files ?? []);
+CHANGES['shot-field'] = (el) => {
+  const row = ui.shots.rows[el.dataset.i];
+  if (!row) return;
+  if (el.dataset.field === 'on') row.on = el.checked;
+  if (el.dataset.field === 'ref') row.ref = el.value;
+  if (el.dataset.field === 'qty') row.qty = Math.max(1, Math.floor(Number(el.value) || 1));
+  render();
+};
+CHANGES['shot-name'] = (el) => {
+  const row = ui.shots.rows[el.dataset.i];
+  if (!row) return;
+  const hit = matchReadText(el.value);
+  if (hit) Object.assign(row, { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? (row.ref ?? 'intact') : null, ok: true, on: true });
+  else Object.assign(row, { name: el.value, ok: false });
+  render();
+};
+ACTIONS['shots-add'] = () => {
+  const take = ui.shots.rows.filter((r) => r.on && r.ok);
+  for (const r of take) {
+    if (r.kind === 'relic') {
+      const c = (state.relics[r.name] ??= {});
+      c[r.ref] = (c[r.ref] ?? 0) + r.qty;
+    } else state.parts[r.name] = owned(r.name) + r.qty;
+  }
+  ui.shots.rows = ui.shots.rows.filter((r) => !(r.on && r.ok));
+  if (!ui.shots.rows.length) ui.shots.unread = [];
+  save(`Added ${take.length} item${take.length === 1 ? '' : 's'} from screenshots`);
+  render();
+};
+ACTIONS['shots-clear'] = () => {
+  Object.assign(ui.shots, { rows: [], unread: [] });
+  render();
+};
+
+view.addEventListener('dragover', (e) => {
+  const zone = e.target.closest('[data-drop]');
+  if (!zone) return;
+  e.preventDefault();
+  zone.classList.add('over');
+});
+view.addEventListener('dragleave', (e) => e.target.closest('[data-drop]')?.classList.remove('over'));
+view.addEventListener('drop', (e) => {
+  if (!e.target.closest('[data-drop]')) return;
+  e.preventDefault();
+  runShots(e.dataTransfer?.files ?? []);
+});
+document.addEventListener('paste', (e) => {
+  if (currentTab() !== 'data') return;
+  const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'));
+  if (!files.length) return;
+  e.preventDefault();
+  runShots(files);
+});
+
 VIEWS.data = () => {
   const b = (ui.bulk ??= { mode: 'inventory', text: '', report: null });
   const r = b.report;
   return `
     ${head('Data', 'Your inventory lives only in this browser. Export a backup now and then, especially before clearing site data or switching devices.')}
+    ${shotsPanel()}
     <div class="panel">
       <h3>Bulk paste</h3>
       <p class="small muted">One item per line. Counts are added to what you already have.</p>
@@ -896,6 +1089,7 @@ function fillDatalists() {
   document.getElementById('dl-relics').innerHTML = opts(Object.keys(DATA.relics));
   document.getElementById('dl-parts').innerHTML = opts(Object.keys(DATA.parts).sort());
   document.getElementById('dl-sets').innerHTML = opts(Object.keys(DATA.sets).sort());
+  document.getElementById('dl-inventory').innerHTML = opts([...Object.keys(DATA.relics), ...Object.keys(DATA.parts).sort()]);
 }
 
 function fillSources() {
