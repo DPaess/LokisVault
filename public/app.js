@@ -632,7 +632,7 @@ VIEWS.mastery = () => {
     </tr>`;
   });
   return `
-    ${head('Mastery', 'Every masterable item we know of. Tick what you have mastered. For a fast first fill, filter down to a category and use “Mark all shown”.')}
+    ${head('Mastery', 'Every masterable item we know of. Tick what you have mastered. For a fast first fill, filter down to a category and use “Mark all shown”, or import screenshots of Profile → Equipment in <a href="#data">Data</a>.')}
     <div class="panel" style="margin-bottom:14px">
       <div class="row"><b>${fmtNum(masteryXp(done))}</b> <span class="muted">of ${fmtNum(masteryXp(items))} mastery points ·</span>
         <b>${done.length}</b> <span class="muted">of ${items.length} items</span></div>
@@ -871,7 +871,24 @@ function matchReadText(text) {
   return null;
 }
 
+const masteryNames = () => (masteryNames.map ??= new Map(masteryItems().map((m) => [norm(m.name), m.name])));
+const fuzzyMastery = () => (fuzzyMastery.fn ??= createFuzzy([...masteryNames()].map(([key, value]) => ({ key, value }))));
+
+// Profile → Equipment tiles read "<NAME> MAX RANK" once mastered ("RANK 28" while levelling).
+// Art behind the label adds junk words, so try runs of words, longest first, exact before fuzzy.
+function readMasteryTile(words) {
+  const rest = words.filter((w) => w !== 'max' && w !== 'rank' && !/^\d+$/.test(w));
+  const runs = [];
+  for (let len = rest.length; len >= 1; len--) for (let i = 0; i + len <= rest.length; i++) runs.push(rest.slice(i, i + len).join(' '));
+  const name = runs.map((r) => masteryNames().get(r)).find(Boolean) ?? runs.filter((r) => r.length >= 4).map((r) => fuzzyMastery()(r)).find(Boolean);
+  if (!name) return null;
+  const item = { kind: 'mastery', name, ref: null };
+  return { ...item, key: shotRowKey(item) };
+}
+
 function readTile(tile) {
+  const all = norm(tile.text).split(' ');
+  if (all.includes('rank')) return all.includes('max') ? readMasteryTile(all) : null;
   let ref = 'intact';
   const words = norm(tile.text)
     .split(' ')
@@ -911,7 +928,7 @@ async function runShots(files) {
         if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, on: true, ok: true });
       }
       // Only text that looks like an item name is worth showing, not menu labels.
-      for (const t of found.unread) if (/\b(prime|relic|blueprint)\b/i.test(t)) unread.add(t);
+      for (const t of found.unread) if (/\b(prime|relic|blueprint)\b/i.test(t) && !/\brank\b/i.test(t)) unread.add(t);
     }
     sh.rows = [...rows.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name, 'en', { numeric: true }));
     sh.unread = [...unread];
@@ -930,21 +947,22 @@ function shotsPanel() {
   const rows = sh.rows.map(
     (r, i) => `<tr class="${r.on ? '' : 'dim'}">
       <td><input type="checkbox" ${r.on ? 'checked' : ''} data-change="shot-field" data-field="on" data-i="${i}" aria-label="Add this item"></td>
-      <td><input class="grow" list="dl-inventory" value="${esc(r.name)}" data-change="shot-name" data-i="${i}" data-focus="shot-name:${i}" aria-label="Item">
+      <td><input class="grow" list="${r.kind === 'mastery' ? 'dl-mastery' : 'dl-inventory'}" value="${esc(r.name)}" data-change="shot-name" data-i="${i}" data-focus="shot-name:${i}" aria-label="Item">
         ${r.ok ? '' : '<div class="miss small">Unknown name, pick one from the list</div>'}</td>
       <td>${
         r.kind === 'relic'
           ? `<select data-change="shot-field" data-field="ref" data-i="${i}" aria-label="Refinement">${REFS.map((x) => `<option value="${x}"${r.ref === x ? ' selected' : ''}>${REF_LABEL[x]}</option>`).join('')}</select>`
-          : '<span class="muted small">Part</span>'
+          : `<span class="muted small">${r.kind === 'mastery' ? 'Mastered' : 'Part'}</span>`
       }</td>
-      <td class="num"><input type="number" min="1" value="${r.qty}" data-change="shot-field" data-field="qty" data-i="${i}" data-focus="shot-qty:${i}" aria-label="Quantity"></td>
+      <td class="num">${r.kind === 'mastery' ? '' : `<input type="number" min="1" value="${r.qty}" data-change="shot-field" data-field="qty" data-i="${i}" data-focus="shot-qty:${i}" aria-label="Quantity">`}</td>
       <td class="muted small hide-sm">${esc(r.read)}</td>
     </tr>`,
   );
   return `
     <div class="panel">
       <h3>Add from screenshots</h3>
-      <p class="small muted">Take screenshots of your inventory in game (the GeForce Now overlay or your system's screenshot key both work), then choose them here, drop them on the box or paste one with Ctrl+V.
+      <p class="small muted">Take screenshots in game (the GeForce Now overlay or your system's screenshot key both work), then choose them here, drop them on the box or paste one with Ctrl+V.
+        Works with Inventory → Prime Parts, Void Relics, and Profile → Equipment for mastery (items showing MAX RANK are marked mastered).
         The text is read on your device and the images are never uploaded. Text recognition makes mistakes, so check names and quantities before adding.</p>
       <div class="drop" data-drop>
         <button type="button" data-action="shots-pick" ${sh.busy ? 'disabled' : ''}>Choose screenshots</button>
@@ -988,6 +1006,11 @@ CHANGES['shot-field'] = (el) => {
 CHANGES['shot-name'] = (el) => {
   const row = ui.shots.rows[el.dataset.i];
   if (!row) return;
+  if (row.kind === 'mastery') {
+    const hits = matchMasteryLine(el.value);
+    Object.assign(row, hits.length ? { name: hits[0].name, ok: true, on: true } : { name: el.value, ok: false });
+    return render();
+  }
   const hit = matchInventoryLine(el.value) ?? matchReadText(el.value);
   if (hit) Object.assign(row, { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? (row.ref ?? 'intact') : null, ok: true, on: true });
   else Object.assign(row, { name: el.value, ok: false });
@@ -996,7 +1019,9 @@ CHANGES['shot-name'] = (el) => {
 ACTIONS['shots-add'] = () => {
   const take = ui.shots.rows.filter((r) => r.on && r.ok);
   for (const r of take) {
-    if (r.kind === 'relic') {
+    if (r.kind === 'mastery') {
+      for (const m of masteryItems()) if (m.name === r.name) state.mastered[m.id] = true;
+    } else if (r.kind === 'relic') {
       const c = (state.relics[r.name] ??= {});
       c[r.ref] = (c[r.ref] ?? 0) + r.qty;
     } else state.parts[r.name] = owned(r.name) + r.qty;
@@ -1412,6 +1437,7 @@ function fillDatalists() {
   document.getElementById('dl-relics').innerHTML = opts(Object.keys(DATA.relics));
   document.getElementById('dl-parts').innerHTML = opts(Object.keys(DATA.parts).sort());
   document.getElementById('dl-sets').innerHTML = opts(Object.keys(DATA.sets).sort());
+  document.getElementById('dl-mastery').innerHTML = opts([...new Set(masteryItems().map((m) => m.name))].sort());
   document.getElementById('dl-inventory').innerHTML = opts([...Object.keys(DATA.relics), ...Object.keys(DATA.parts).sort()]);
 }
 

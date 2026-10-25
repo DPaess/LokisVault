@@ -22,11 +22,13 @@ function loadEngine() {
 // Each screenshot is read several times, prepared differently, and the readings are combined.
 // Game text is light on a dark background behind busy item icons, and no single black and white
 // cut works for every screen: the darkest colour channel hides gold icons, the brightest keeps
-// coloured text. Measured on real inventory screenshots, these three together find nearly everything.
+// coloured text. Measured on real screenshots, these passes together find nearly everything.
+// The Profile → Equipment screen prints dark names on a light band, which the last pass reads.
 const PASSES = [
   { channel: 'min', cut: 120 },
   { channel: 'min', cut: 'otsu' },
   { channel: 'max', cut: 150 },
+  { channel: 'max', cut: 90, dark: true },
 ];
 
 // Best split between dark and light for a histogram (Otsu's method).
@@ -68,7 +70,7 @@ async function prepareImage(blob) {
     channels.min[j] = Math.min(src[i], src[i + 1], src[i + 2]);
     channels.max[j] = Math.max(src[i], src[i + 1], src[i + 2]);
   }
-  return PASSES.map(({ channel, cut }) => {
+  return PASSES.map(({ channel, cut, dark }) => {
     const grey = channels[channel];
     if (cut === 'otsu') {
       const hist = new Uint32Array(256);
@@ -81,7 +83,8 @@ async function prepareImage(blob) {
     const octx = out.getContext('2d');
     const img = octx.createImageData(w, h);
     for (let j = 0; j < grey.length; j++) {
-      const v = grey[j] >= cut ? 0 : 255;
+      // Text ends up black: light text normally, dark text for a dark pass.
+      const v = (dark ? grey[j] < cut : grey[j] >= cut) ? 0 : 255;
       img.data[j * 4] = img.data[j * 4 + 1] = img.data[j * 4 + 2] = v;
       img.data[j * 4 + 3] = 255;
     }
