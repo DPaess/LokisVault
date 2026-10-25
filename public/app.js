@@ -223,6 +223,36 @@ ACTIONS.more = (el) => {
   el.textContent = all ? 'Show fewer' : `Show ${el.dataset.n} more`;
 };
 
+// Long pages render a first batch and grow on demand, instead of drawing hundreds of rows at once.
+// The count resets whenever that page's filters change (filters is any JSON-able value).
+const PAGE_SIZE = { relics: 24, parts: 50, wishlist: 12, mastery: 60, trade: 50 };
+const pages = {}; // key -> { sig, limit }
+function page(key, items, filters = null) {
+  const sig = JSON.stringify(filters);
+  if (pages[key]?.sig !== sig) pages[key] = { sig, limit: PAGE_SIZE[key] };
+  const { limit } = pages[key];
+  const rest = items.length - limit;
+  return {
+    items: items.slice(0, limit),
+    more:
+      rest > 0
+        ? `<div class="toolbar more-row">
+             <button class="small" data-action="page-more" data-key="${key}">Show ${Math.min(rest, PAGE_SIZE[key])} more</button>
+             <button class="small ghost" data-action="page-all" data-key="${key}">Show all ${items.length}</button>
+             <span class="muted small">${limit} of ${items.length} shown</span>
+           </div>`
+        : '',
+  };
+}
+ACTIONS['page-more'] = (el) => {
+  pages[el.dataset.key].limit += PAGE_SIZE[el.dataset.key];
+  render();
+};
+ACTIONS['page-all'] = (el) => {
+  pages[el.dataset.key].limit = Infinity;
+  render();
+};
+
 // ---- Relics ------------------------------------------------------------------
 
 const relicIndex = () => (relicIndex.map ??= new Map(Object.keys(DATA.relics).map((k) => [norm(k), k])));
@@ -313,7 +343,7 @@ VIEWS.relics = () => {
     </div>
     ${
       names.length
-        ? `<div class="grid cards">${names.map((r) => relicCard(r, need)).join('')}</div>`
+        ? ((pg) => `<div class="grid cards">${pg.items.map((r) => relicCard(r, need)).join('')}</div>${pg.more}`)(page('relics', names, f))
         : `<div class="empty">${total ? 'No relic matches this filter.' : 'No relics yet. Add one above or bulk paste a list in Data.'}</div>`
     }
     <p class="small muted" style="margin-top:14px">“Vaulted” means the relic is not in any mission or bounty drop table today. Relics from Prime Resurgence (Varzia) also show as vaulted.</p>`;
@@ -375,7 +405,8 @@ VIEWS.parts = () => {
   const need = needs();
   const names = Object.keys(state.parts).sort((a, b) => partSortKey(a).localeCompare(partSortKey(b)));
   const buildable = Object.keys(DATA.sets).filter(setComplete);
-  const rows = names.map((p) => {
+  const pg = page('parts', names);
+  const rows = pg.items.map((p) => {
     const n = need[p] ?? 0;
     const status = n ? (owned(p) >= n ? '<span class="ok">✓</span>' : `<span class="miss">${missingOf(need, p)} short</span>`) : '';
     return `<tr>
@@ -408,6 +439,7 @@ VIEWS.parts = () => {
              <thead><tr><th>Part</th><th>Set</th><th class="num">Owned</th><th class="num">Needed</th><th class="num">Ducats</th><th class="num">Price</th></tr></thead>
              <tbody>${rows.join('')}</tbody>
            </table></div>
+           ${pg.more}
            <p class="small muted">${names.length} kinds, ${sum(names.map(owned))} parts in total.</p>`
         : '<div class="empty">No prime parts yet. Add one above or bulk paste a list in Data.</div>'
     }`;
@@ -552,7 +584,7 @@ VIEWS.wishlist = () => {
     }
     ${
       sets.length
-        ? `<div class="grid cards">${sets.map((s) => wishCard(s, need)).join('')}</div>`
+        ? ((pg) => `<div class="grid cards">${pg.items.map((s) => wishCard(s, need)).join('')}</div>${pg.more}`)(page('wishlist', sets, f))
         : state.wishlist.length
           ? '<div class="empty">No set on your wishlist matches these filters.</div>'
           : '<div class="empty">Your wishlist is empty. Add a set above, or use “Add to wishlist” on an unmastered prime in Mastery.</div>'
@@ -618,7 +650,8 @@ VIEWS.mastery = () => {
   const f = ui.mastery;
   const categories = [...new Set(items.map((m) => m.category))].sort();
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
-  const rows = shown.map((m) => {
+  const pg = page('mastery', shown, f);
+  const rows = pg.items.map((m) => {
     const isDone = Boolean(state.mastered[m.id]);
     const wishable = m.prime && !isDone && DATA.sets[m.name] && !state.wishlist.includes(m.name);
     return `<tr class="${isDone ? 'dim' : ''}">
@@ -632,7 +665,7 @@ VIEWS.mastery = () => {
     </tr>`;
   });
   return `
-    ${head('Mastery', 'Every masterable item we know of. Tick what you have mastered. For a fast first fill, filter down to a category and use “Mark all shown”, or import screenshots of Profile → Equipment in <a href="#data">Data</a>.')}
+    ${head('Mastery', 'Every masterable item we know of. Tick what you have mastered. For a fast first fill, filter down to a category and use “Mark all as mastered” (it covers every match, not only the rows on screen), or import screenshots of Profile → Equipment in <a href="#data">Data</a>.')}
     <div class="panel" style="margin-bottom:14px">
       <div class="row"><b>${fmtNum(masteryXp(done))}</b> <span class="muted">of ${fmtNum(masteryXp(items))} mastery points ·</span>
         <b>${done.length}</b> <span class="muted">of ${items.length} items</span></div>
@@ -645,17 +678,18 @@ VIEWS.mastery = () => {
       <select data-change="mastery-filter" data-key="status" aria-label="Status">${opt('todo', 'Not mastered', f.status)}${opt('done', 'Mastered', f.status)}${opt('', 'Any status', f.status)}</select>
     </div>
     <div class="toolbar">
-      <span class="muted small">${shown.length} shown, ${fmtNum(masteryXp(shown.filter((m) => !state.mastered[m.id])))} points still to earn among them</span>
+      <span class="muted small">${shown.length} match, ${fmtNum(masteryXp(shown.filter((m) => !state.mastered[m.id])))} points still to earn among them</span>
       <span class="spacer"></span>
-      <button class="small" data-action="mastery-bulk" data-value="1" ${shown.length ? '' : 'disabled'}>Mark all shown as mastered</button>
-      <button class="small danger" data-action="mastery-bulk" data-value="0" ${shown.length ? '' : 'disabled'}>Unmark all shown</button>
+      <button class="small" data-action="mastery-bulk" data-value="1" ${shown.length ? '' : 'disabled'}>Mark all ${shown.length} as mastered</button>
+      <button class="small danger" data-action="mastery-bulk" data-value="0" ${shown.length ? '' : 'disabled'}>Unmark all ${shown.length}</button>
     </div>
     ${
       shown.length
         ? `<div class="table-wrap"><table>
              <thead><tr><th></th><th>Name</th><th>Category</th><th class="hide-sm">Type</th><th class="num">XP</th><th class="num">MR</th><th></th></tr></thead>
              <tbody>${rows.join('')}</tbody>
-           </table></div>`
+           </table></div>
+           ${pg.more}`
         : '<div class="empty">Nothing matches these filters.</div>'
     }
     <p class="small muted">Not tracked yet: Amps, some MOA and Hound parts, Plexus, intrinsics and the star chart.</p>`;
@@ -678,7 +712,7 @@ CHANGES['mastery-toggle'] = (el) => {
 ACTIONS['mastery-bulk'] = (el) => {
   const shown = masteryShown();
   const on = el.dataset.value === '1';
-  if (!confirm(`${on ? 'Mark' : 'Unmark'} all ${shown.length} shown items as ${on ? '' : 'not '}mastered?`)) return;
+  if (!confirm(`${on ? 'Mark' : 'Unmark'} all ${shown.length} items matching your filters as ${on ? '' : 'not '}mastered? This includes the ones not on screen yet.`)) return;
   for (const m of shown) {
     if (on) state.mastered[m.id] = true;
     else delete state.mastered[m.id];
@@ -720,6 +754,7 @@ VIEWS.trade = () => {
   const sellPile = rows.filter((r) => r.v.key === 'sell');
   const ducatPile = rows.filter((r) => r.v.key === 'ducat');
   const sets = spareSets(need);
+  const pg = page('trade', rows);
 
   return `
     ${head('Sell or ducat', 'Spare parts are the ones you own beyond what your wishlist needs. Prices are the median of the five cheapest sellers online on warframe.market, refreshed daily.')}
@@ -732,7 +767,7 @@ VIEWS.trade = () => {
       rows.length
         ? `<div class="table-wrap"><table>
             <thead><tr><th>Part</th><th class="num">Spare</th><th class="num">Price</th><th class="num">Best buy</th><th class="num">Ducats</th><th class="num">D / p</th><th>Verdict</th><th class="num">Stack</th></tr></thead>
-            <tbody>${rows
+            <tbody>${pg.items
               .map(
                 (r) => `<tr>
                   <td>${marketUrl(r.p) ? `<a href="${esc(marketUrl(r.p))}" target="_blank" rel="noopener">${esc(r.p)}</a>` : esc(r.p)}${priceEntry(r.p)?.stale ? ' <span class="badge" title="Last refresh failed, showing an older price">old</span>' : ''}</td>
@@ -747,6 +782,7 @@ VIEWS.trade = () => {
               )
               .join('')}</tbody>
           </table></div>
+          ${pg.more}
           <div class="grid stats" style="margin-top:14px">
             ${stat('Sell pile', fmtP(sum(sellPile.map((r) => r.price * r.n))), `${sum(sellPile.map((r) => r.n))} parts`)}
             ${stat('Ducat pile', fmtD(sum(ducatPile.map((r) => r.ducats * r.n))), `${sum(ducatPile.map((r) => r.n))} parts for Baro Ki'Teer`)}
