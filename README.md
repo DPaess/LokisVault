@@ -57,7 +57,7 @@ Yes. The site never touches the game: no memory reading, no screen capture, no a
 * [WFCD/warframe-items](https://github.com/WFCD/warframe-items) (`@wfcd/items`): masterable items, prime sets, components and ducats.
 * [WFCD/warframe-drop-data](https://github.com/WFCD/warframe-drop-data): relic reward tables and current mission drops, from DE's official drop tables.
 * [Tesseract.js](https://github.com/naptha/tesseract.js): in browser text recognition for the screenshot import.
-* [warframe.market](https://warframe.market) API: live sell and buy orders. A price is the median of the five cheapest sellers who are online or in game.
+* [warframe.market](https://warframe.market) API: live sell and buy orders. A price is the lowest sell order from a player who is online or in game, refreshed once a day.
 
 Thanks to the Warframe Community Developers and the warframe.market team.
 

@@ -99,7 +99,7 @@ Mastery points: 200 per rank for frames, companions, archwings, necramechs, K-dr
   } }
 ```
 
-Keys are our names, plus ` Set` for sets and ` Relic` for relics (intact price). `sell` is the cheapest live seller, `sellMed` the median of the five cheapest live sellers (use this as "the price"), `buy` the best live buy order. Entries can carry `stale: true` when a fetch failed and the previous value was kept.
+Keys are our names, plus ` Set` for sets and ` Relic` for relics (intact price). `sell` is the cheapest live seller (use this as "the price", Danilo's choice on 2026-10-25), `sellMed` the median of the five cheapest live sellers (fallback), `buy` the best live buy order. Entries can carry `stale: true` when a fetch failed and the previous value was kept.
 
 **fetch-prices.mjs is tested** against the real v2 API. Names match almost one to one (1555 of 1557, the two misses are relics the market does not list). Relic orders carry a `subtype` (refinement), only `intact` orders are priced. `/orders/item/{slug}/top` returns at most five orders per side. A full run takes about 10 minutes.
 
@@ -125,7 +125,7 @@ Optional Gist sync keeps its own keys, never exported: `lokisvault:sync` (`{ tok
 
 Drop zero counts from storage. Wrap every localStorage access in try/catch.
 
-Helper: `priceOf(name)` returns `prices[name]?.sellMed ?? prices[name]?.sell ?? null`. Sets use `"<set> Set"`, relics `"<relic> Relic"`.
+Helper: `priceOf(name)` returns `prices[name]?.sell ?? prices[name]?.sellMed ?? null`. Sets use `"<set> Set"`, relics `"<relic> Relic"`.
 
 Derived "need" for a part = sum over wishlist sets of `part.count`. "Missing" = need minus owned (min 0). "Spare" = owned minus need (min 0). Parts of wishlist sets are **wanted**.
 
@@ -140,7 +140,7 @@ Derived "need" for a part = sum over wishlist sets of `part.count`. "Missing" = 
    * if every relic is vaulted: "Vaulted. Buy on warframe.market for ~Xp" (link to `https://warframe.market/items/<slug>` when the slug is known) and mention Prime Resurgence.
    Mark set as built: removes it from the wishlist and marks its mastery item as mastered.
 5. **Mastery**: summary bar (mastered points / total, items). Filters: search, category, prime or non prime, status (default: not mastered). Table with checkbox, name, category, type, xp, MR requirement, badge for prime vaulted. For an unmastered prime that is not in the wishlist, an "Add to wishlist" button. Bulk actions: "Mark all shown as mastered" and "Unmark all shown", both with `confirm()`. This bulk action is how Danilo will do the first fill quickly.
-6. **Sell or ducat**: every part with spare > 0. Columns: part, spare, price (sellMed), best buy, ducats, ducats per plat, verdict, value of the spare stack. Verdict: no price data → "Hold" (`.hold`). `ducats / price >= settings.ducatRatio` → "Ducats" (`.ducat`), otherwise "Sell" (`.sell`). The ratio is editable at the top (default 10, explain it in one line). Totals at the bottom for the sell pile in plat and the ducat pile in ducats. Also list full spare sets where selling the set beats selling parts separately.
+6. **Sell or ducat**: every part with spare > 0. Columns: part, spare, price (lowest live sell), best buy, ducats, ducats per plat, verdict, value of the spare stack. Verdict: no price data → "Hold" (`.hold`). `ducats / price >= settings.ducatRatio` → "Ducats" (`.ducat`), otherwise "Sell" (`.sell`). The ratio is editable at the top (default 10, explain it in one line). Totals at the bottom for the sell pile in plat and the ducat pile in ducats. Also list full spare sets where selling the set beats selling parts separately.
 7. **Data**: export JSON (download `lokisvault-backup-YYYY-MM-DD.json`), import JSON file (validate, replace state), reset (confirm). **Bulk paste** textarea with mode select (relics and parts / mastered items):
    * relics: lines like `Neo H4`, `2 Neo H4 Radiant`, `Neo H4 Relic (Radiant) x3`, `3x lith g1`.
    * parts: `Loki Prime Chassis`, `2x Loki Prime Chassis Blueprint`, `Ash Prime Systems x2`. Match case insensitively, accept a missing trailing "Blueprint", accept a unique prefix match.

@@ -31,7 +31,8 @@ const bar = (a, b) => `<div class="bar"><span style="width:${pct(a, b).toFixed(1
 const priceEntry = (name) => PRICES[name] ?? null;
 // A built item used as an ingredient (Bronco Prime for Akbronco Prime) trades as its set.
 const priceKey = (name) => (PRICES[name] || !DATA?.parts[name]?.built ? name : `${name} Set`);
-const priceOf = (name) => PRICES[priceKey(name)]?.sellMed ?? PRICES[priceKey(name)]?.sell ?? null;
+// The price is the cheapest seller who is online or in game right now (as of the daily refresh).
+const priceOf = (name) => PRICES[priceKey(name)]?.sell ?? PRICES[priceKey(name)]?.sellMed ?? null;
 const setPrice = (set) => priceOf(`${set} Set`);
 const relicPrice = (relic) => priceOf(`${relic} Relic`);
 const marketUrl = (name) => (PRICES[priceKey(name)]?.slug ? `https://warframe.market/items/${PRICES[priceKey(name)].slug}` : null);
@@ -942,7 +943,7 @@ VIEWS.trade = () => {
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
 
   return `
-    ${head('Sell or ducat', 'Spare parts are the ones you own beyond what your wishlist needs. Prices are the median of the five cheapest sellers online on warframe.market, refreshed daily.')}
+    ${head('Sell or ducat', 'Spare parts are the ones you own beyond what your wishlist needs. Prices are the lowest sell order from a player online or in game on warframe.market, refreshed daily.')}
     <div class="panel" style="margin-bottom:14px">
       <label class="row">Trade for ducats when one plat is worth at least
         <input type="number" min="1" step="1" value="${state.settings.ducatRatio}" data-change="ratio" data-focus="ratio" aria-label="Ducats per plat"> ducats</label>
