@@ -187,6 +187,121 @@ VIEWS.overview = () => {
     </div>`;
 };
 
+// ---- Relics ------------------------------------------------------------------
+
+const relicIndex = () => (relicIndex.map ??= new Map(Object.keys(DATA.relics).map((k) => [norm(k), k])));
+const resolveRelic = (text) => relicIndex().get(norm(text).replace(/\brelic\b/g, '').replace(/\s+/g, ' ').trim()) ?? null;
+
+const relicBadge = (name) =>
+  DATA.relics[name].farmable ? '<span class="badge farm">Dropping now</span>' : '<span class="badge vault">Vaulted</span>';
+
+function rewardLine(w, ref, need) {
+  const part = DATA.parts[w.item];
+  const want = missingOf(need, w.item) > 0;
+  const meta = [fmtPct(w.chance[ref]), priceOf(w.item) != null ? fmtP(priceOf(w.item)) : '', part?.ducats ? fmtD(part.ducats) : '']
+    .filter(Boolean)
+    .join(' · ');
+  return `<div class="reward ${w.rarity}${want ? ' want' : ''}"><span class="name">${esc(w.item)}</span><span class="meta">${meta}</span></div>`;
+}
+
+function relicCard(name, need) {
+  const relic = DATA.relics[name];
+  const ref = bestRef(name);
+  const ev = { intact: relicEV(name, 'intact'), radiant: relicEV(name, 'radiant') };
+  const price = relicPrice(name);
+  return `
+    <article class="card">
+      <header>
+        <div><h3>${esc(name)}</h3><div class="row small muted">${esc(relic.era)} ${relicBadge(name)}${price != null ? ` <span>${fmtP(price)} intact</span>` : ''}</div></div>
+        <button class="small ghost danger" data-action="relic-remove" data-relic="${esc(name)}" title="Remove">✕</button>
+      </header>
+      <div class="counts">
+        ${REFS.map(
+          (r) => `<label>${REF_LABEL[r]}<input type="number" min="0" step="1" value="${state.relics[name]?.[r] ?? 0}"
+            data-change="relic-count" data-relic="${esc(name)}" data-ref="${r}" data-focus="relic:${esc(name)}:${r}"></label>`,
+        ).join('')}
+      </div>
+      <div class="rewards">${relic.rewards.map((w) => rewardLine(w, ref, need)).join('')}</div>
+      <div class="ev">
+        <span>EV intact <b>${fmtP(ev.intact.plat, 1)}</b> / ${fmtD(ev.intact.ducats, 1)}</span>
+        <span>EV radiant <b>${fmtP(ev.radiant.plat, 1)}</b> / ${fmtD(ev.radiant.ducats, 1)}</span>
+      </div>
+      <div class="small muted">Chances shown for ${REF_LABEL[ref].toLowerCase()}.</div>
+    </article>`;
+}
+
+VIEWS.relics = () => {
+  const need = needs();
+  const f = (ui.relics ??= { filter: 'all', sort: 'ev' });
+  const hasWanted = (r) => DATA.relics[r].rewards.some((w) => missingOf(need, w.item) > 0);
+  let names = Object.keys(state.relics);
+  if (f.filter === 'wanted') names = names.filter(hasWanted);
+  if (f.filter === 'vaulted') names = names.filter((r) => !DATA.relics[r].farmable);
+  const evOf = (r) => relicEV(r, bestRef(r)).plat;
+  const sorters = {
+    ev: (a, b) => evOf(b) - evOf(a),
+    name: (a, b) => a.localeCompare(b, 'en', { numeric: true }),
+    count: (a, b) => relicTotal(b) - relicTotal(a),
+  };
+  names.sort(sorters[f.sort] ?? sorters.ev);
+  const total = Object.keys(state.relics).length;
+
+  return `
+    ${head('Relics', 'Every relic you own, by refinement. Parts your wishlist still needs are highlighted in blue. EV is the average platinum and ducats one opening is worth at market prices.')}
+    <form class="toolbar" data-form="relic-add">
+      <input class="grow" name="name" list="dl-relics" placeholder="Relic, e.g. Neo H4" autocomplete="off" data-focus="relic-add" required>
+      <select name="ref">${REFS.map((r) => `<option value="${r}">${REF_LABEL[r]}</option>`).join('')}</select>
+      <input type="number" name="qty" min="1" value="1" aria-label="Quantity">
+      <button class="primary">Add</button>
+    </form>
+    <div class="toolbar">
+      <select data-change="relic-filter" aria-label="Filter">
+        ${[['all', 'All relics'], ['wanted', 'Has parts I need'], ['vaulted', 'Vaulted only']].map(([v, l]) => `<option value="${v}"${f.filter === v ? ' selected' : ''}>${l}</option>`).join('')}
+      </select>
+      <select data-change="relic-sort" aria-label="Sort">
+        ${[['ev', 'Sort by EV'], ['name', 'Sort by name'], ['count', 'Sort by count']].map(([v, l]) => `<option value="${v}"${f.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
+      </select>
+      <span class="spacer"></span>
+      <span class="muted small">${names.length} of ${total} relics shown</span>
+    </div>
+    ${
+      names.length
+        ? `<div class="grid cards">${names.map((r) => relicCard(r, need)).join('')}</div>`
+        : `<div class="empty">${total ? 'No relic matches this filter.' : 'No relics yet. Add one above or bulk paste a list in Data.'}</div>`
+    }
+    <p class="small muted" style="margin-top:14px">“Vaulted” means the relic is not in any mission or bounty drop table today. Relics from Prime Resurgence (Varzia) also show as vaulted.</p>`;
+};
+
+FORMS['relic-add'] = (form, fd) => {
+  const name = resolveRelic(fd.get('name'));
+  if (!name) return toast(`Unknown relic “${fd.get('name')}”`);
+  const ref = fd.get('ref');
+  const qty = Math.max(1, Number(fd.get('qty')) || 1);
+  const r = (state.relics[name] ??= {});
+  r[ref] = (r[ref] ?? 0) + qty;
+  save(`Added ${qty}× ${name} ${REF_LABEL[ref]}`);
+  render();
+};
+CHANGES['relic-count'] = (el) => {
+  const r = (state.relics[el.dataset.relic] ??= {});
+  r[el.dataset.ref] = Math.max(0, Math.floor(Number(el.value) || 0));
+  save();
+  render();
+};
+CHANGES['relic-filter'] = (el) => {
+  ui.relics.filter = el.value;
+  render();
+};
+CHANGES['relic-sort'] = (el) => {
+  ui.relics.sort = el.value;
+  render();
+};
+ACTIONS['relic-remove'] = (el) => {
+  delete state.relics[el.dataset.relic];
+  save(`Removed ${el.dataset.relic}`);
+  render();
+};
+
 const todo = (title) => () => `${head(title)}<div class="empty">Coming soon.</div>`;
 for (const [tab, title] of Object.entries({ relics: 'Relics', parts: 'Prime parts', wishlist: 'Wishlist', mastery: 'Mastery', trade: 'Sell or ducat', data: 'Data' })) {
   VIEWS[tab] ??= todo(title);
