@@ -1151,13 +1151,15 @@ function readRelicCode(words) {
   for (let i = 0; i < words.length; i++) {
     const era = words[i].length >= 3 && fuzzyEra(words[i], 0.34);
     if (!era) continue;
-    // The code normally follows the era, but some reads come back as "75 Relic Neo".
+    // The code normally follows the era. Only when that gives nothing, try the word before it,
+    // since some reads come back as "75 Relic Neo" (and junk before the era must not compete).
     for (const raw of [words[i + 1], words[i - 1]]) {
       if (!raw || raw === 'relic') continue;
       for (const code of codeReadings(raw)) {
         const name = resolveRelic(`${era} ${code}`);
         if (name) found.add(name);
       }
+      if (found.size) break;
     }
     if (found.size) break;
   }
