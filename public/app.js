@@ -2,7 +2,7 @@
 // Game data comes from data/items.json and data/prices.json (built by scripts/).
 // The player's inventory lives in localStorage under STORE_KEY.
 
-import { readImages, combinePasses, createFuzzy } from './ocr.js';
+import { readScreens, combinePasses, createFuzzy } from './ocr.js';
 
 const STORE_KEY = 'lokisvault:v1';
 const REFS = ['intact', 'exceptional', 'flawless', 'radiant'];
@@ -1199,7 +1199,7 @@ async function runShots(files) {
   Object.assign(sh, { busy: true, progress: 'Loading the text reader…' });
   render();
   try {
-    const pages = await readImages(images, (msg) => {
+    const pages = await readScreens(images, (msg) => {
       sh.progress = msg;
       const el = document.getElementById('shot-progress');
       if (el) el.textContent = msg;
@@ -1207,7 +1207,28 @@ async function runShots(files) {
     // Screenshots taken while scrolling overlap, so an item seen twice counts once, at its highest quantity.
     const rows = new Map(sh.rows.map((r) => [shotRowKey(r), r]));
     const unread = new Set(sh.unread);
-    for (const { passes, light } of pages) {
+    const addRow = ({ key, kind, name, ref, qty, read, sure }) => {
+      const prev = rows.get(key);
+      if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, sure: sure || Boolean(prev?.sure), on: true, ok: true, replace: false });
+    };
+    for (const page of pages) {
+      if (page.mode === 'tiles') {
+        // Each tile was read on its own: its name lines, its count and how lit its icon is.
+        for (const t of page.tiles) {
+          const hit = readTile({ text: t.text, qty: t.count });
+          if (!hit) {
+            if (/\b(prime|relic|blueprint)\b/i.test(t.text) && !/\brank\b/i.test(t.text)) unread.add(t.text);
+            continue;
+          }
+          if (hit.kind === 'relic' && t.light < 0.02) {
+            sh.greyed = (sh.greyed ?? 0) + 1;
+            continue;
+          }
+          addRow({ ...hit, qty: t.count ?? 1, read: t.text, sure: t.conf >= 0.9 });
+        }
+        continue;
+      }
+      const { passes, light } = page;
       const found = combinePasses(passes, readTile);
       for (const { key, kind, name, ref, qty, read, box, sure } of found.items) {
         // The relic screen also lists relics you do not own, with a greyed out icon.
@@ -1215,8 +1236,7 @@ async function runShots(files) {
           sh.greyed = (sh.greyed ?? 0) + 1;
           continue;
         }
-        const prev = rows.get(key);
-        if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, sure: sure || Boolean(prev?.sure), on: true, ok: true, replace: false });
+        addRow({ key, kind, name, ref, qty, read, sure });
       }
       // Only text that looks like an item name is worth showing, not menu labels.
       for (const t of found.unread) if (/\b(prime|relic|blueprint)\b/i.test(t) && !/\brank\b/i.test(t)) unread.add(t);
@@ -1274,7 +1294,8 @@ function shotsPanel() {
       <h3>Add from screenshots</h3>
       <p class="small muted">Take screenshots in game (the GeForce Now overlay or your system's screenshot key both work), then choose them here, drop them on the box or paste one with Ctrl+V.
         Works with Inventory → Prime Parts, Void Relics, and Profile → Equipment for mastery (items showing MAX RANK are marked mastered).
-        The text is read on your device and the images are never uploaded. Text recognition makes mistakes, so check names and quantities before adding.</p>
+        The text is read on your device and the images are never uploaded. The first time, the reader downloads about 28 MB (then it is cached).
+        Text recognition makes mistakes, so check names and quantities before adding.</p>
       <div class="drop" data-drop>
         <button type="button" data-action="shots-pick" ${sh.busy ? 'disabled' : ''}>Choose screenshots</button>
         <input type="file" accept="image/*" multiple data-change="shots-files" hidden>

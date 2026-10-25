@@ -2,6 +2,9 @@
 // Text recognition runs in the browser with Tesseract.js: the image never leaves the device,
 // only the engine and its English model are downloaded (once, then cached) from jsDelivr.
 
+import { findTiles, tileRegions, lightIn, textLines } from './layout.js';
+import { loadReader, readLine } from './paddle.js';
+
 const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 
 let engine = null;
@@ -368,4 +371,63 @@ export function createFuzzy(keys) {
     if (bestD > 0 && (bestD > limit || runnerD - bestD < 0.5)) return null;
     return best;
   };
+}
+
+// Reads screenshots tile by tile when they show an inventory grid (Prime Parts, Void Relics,
+// Profile → Equipment): each tile's name lines and count corner are read on their own with
+// PaddleOCR, which on real screenshots is far more accurate than reading the whole screen.
+// Screenshots without a grid fall back to the whole screen reader (readImages).
+// Returns one entry per image: { mode: 'tiles', tiles: [{ text, conf, count, light, box }] }
+// or { mode: 'words', passes, light } from readImages.
+export async function readScreens(blobs, onProgress = () => {}) {
+  const out = [];
+  let reader = null;
+  for (let i = 0; i < blobs.length; i++) {
+    onProgress(`Finding the grid in image ${i + 1} of ${blobs.length}…`);
+    const bmp = await createImageBitmap(blobs[i]);
+    const w = bmp.width;
+    const h = bmp.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0);
+    bmp.close?.();
+    const rgba = ctx.getImageData(0, 0, w, h).data;
+    const v = new Uint8Array(w * h);
+    for (let j = 0; j < w * h; j++) v[j] = Math.max(rgba[j * 4], rgba[j * 4 + 1], rgba[j * 4 + 2]);
+    const grid = findTiles(v, w, h);
+    if (grid.length < 4) {
+      out.push({ mode: 'words', ...(await readImages([blobs[i]], onProgress))[0] });
+      continue;
+    }
+    if (!reader) {
+      onProgress('Loading the text reader (about 28 MB the first time)…');
+      reader = await loadReader();
+    }
+    const tiles = [];
+    for (let k = 0; k < grid.length; k++) {
+      onProgress(`Reading image ${i + 1} of ${blobs.length}, tile ${k + 1} of ${grid.length}…`);
+      const t = grid[k];
+      const reg = tileRegions(t);
+      const lines = [];
+      for (const box of textLines(rgba, w, h, reg.name, 0.13 * (t.x1 - t.x0))) {
+        const line = await readLine(reader, rgba, w, box);
+        if (line.text.trim()) lines.push(line);
+      }
+      if (!lines.length) continue;
+      const c = reg.count;
+      const countRead = await readLine(reader, rgba, w, { x0: Math.max(0, c.x0), y0: Math.max(0, c.y0), x1: Math.min(w, c.x1), y1: Math.min(h, c.y1) });
+      const m = countRead.conf > 0.6 ? countRead.text.match(/(\d{1,3})/) : null;
+      tiles.push({
+        text: lines.map((l) => l.text).join(' '),
+        conf: Math.min(...lines.map((l) => l.conf)),
+        count: m && Number(m[1]) > 0 ? Number(m[1]) : null,
+        light: lightIn(v, w, reg.icon),
+        box: t,
+      });
+    }
+    out.push({ mode: 'tiles', tiles });
+  }
+  return out;
 }
