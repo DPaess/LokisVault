@@ -29,10 +29,12 @@ const pct = (a, b) => (b ? Math.min(100, (a / b) * 100) : 0);
 const bar = (a, b) => `<div class="bar"><span style="width:${pct(a, b).toFixed(1)}%"></span></div>`;
 
 const priceEntry = (name) => PRICES[name] ?? null;
-const priceOf = (name) => PRICES[name]?.sellMed ?? PRICES[name]?.sell ?? null;
+// A built item used as an ingredient (Bronco Prime for Akbronco Prime) trades as its set.
+const priceKey = (name) => (PRICES[name] || !DATA?.parts[name]?.built ? name : `${name} Set`);
+const priceOf = (name) => PRICES[priceKey(name)]?.sellMed ?? PRICES[priceKey(name)]?.sell ?? null;
 const setPrice = (set) => priceOf(`${set} Set`);
 const relicPrice = (relic) => priceOf(`${relic} Relic`);
-const marketUrl = (name) => (PRICES[name]?.slug ? `https://warframe.market/items/${PRICES[name].slug}` : null);
+const marketUrl = (name) => (PRICES[priceKey(name)]?.slug ? `https://warframe.market/items/${PRICES[priceKey(name)].slug}` : null);
 // Opens the item's warframe.market page in a new tab, where you place the sell order yourself.
 const sellLink = (name) =>
   marketUrl(name)
@@ -228,7 +230,7 @@ VIEWS.overview = () => {
              ${showMore(
                noSource.map(
                  (p) => `<details class="expand">
-                   <summary class="reward"><span>${esc(p)} <span class="muted small">${esc(partSets(p).join(', '))}</span></span><span class="meta">${DATA.parts[p]?.farmable ? '<span class="badge farm">Farmable</span>' : '<span class="badge vault">Vaulted</span>'}</span></summary>
+                   <summary class="reward"><span>${esc(p)} <span class="muted small">${esc(partSets(p).join(', '))}</span></span><span class="meta">${DATA.parts[p]?.built ? '<span class="badge gold">Build</span>' : DATA.parts[p]?.farmable ? '<span class="badge farm">Farmable</span>' : '<span class="badge vault">Vaulted</span>'}</span></summary>
                    <div class="where small">${whereToGet(p)}</div>
                  </details>`,
                ),
@@ -597,6 +599,17 @@ const countsShort = (relic) =>
 
 function whereToGet(part) {
   const info = DATA.parts[part];
+  if (info?.built) {
+    const url = marketUrl(part);
+    const price = priceOf(part);
+    const wish = DATA.sets[part] && !state.wishlist.includes(part)
+      ? ` <button class="small" data-action="wish-add" data-set="${esc(part)}">+ Wishlist ${esc(part)}</button>`
+      : state.wishlist.includes(part)
+        ? ' It is on your wishlist.'
+        : '';
+    return `<div>Built from the ${esc(part)} set: build it, then mark it as built (or add it in Prime parts).${wish}</div>
+      <div>Or buy the set on ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">warframe.market</a>` : 'warframe.market'}${price != null ? ` for ~${fmtP(price)}` : ''}.</div>`;
+  }
   const relics = info?.relics ?? [];
   const lines = [];
   const mine = relics.filter((r) => relicTotal(r) > 0);
@@ -765,6 +778,8 @@ ACTIONS['wish-built'] = (el) => {
   for (const p of s.parts) state.parts[p.name] = Math.max(0, owned(p.name) - p.count);
   state.wishlist = state.wishlist.filter((x) => x !== set);
   state.mastered[s.id] = true;
+  // Built weapons that other sets use (Bronco Prime for Akbronco Prime) are kept as a part you own.
+  if (DATA.parts[set]?.built) state.parts[set] = owned(set) + 1;
   save(`${set} built and marked as mastered`, true);
   render();
 };

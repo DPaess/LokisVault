@@ -60,6 +60,10 @@ async function main() {
   const sets = {};
   const parts = {};
   const seen = new Set();
+  // Every item by uniqueName, so recipes that use another built item (Akbronco Prime takes two
+  // Bronco Prime) can name it.
+  const itemNames = new Map();
+  for (const file of Object.keys(ITEM_FILES)) for (const item of loadItems(file)) itemNames.set(item.uniqueName, item.name);
 
   for (const [file, fileCategory] of Object.entries(ITEM_FILES)) {
     for (const item of loadItems(file)) {
@@ -83,6 +87,16 @@ async function main() {
       if (!isPrime) continue;
       const setParts = [];
       for (const ref of item.components || []) {
+        // A built prime item used as an ingredient: tracked as a part you own once built.
+        const built = itemNames.get(ref.uniqueName);
+        if (built && / Prime$/.test(built) && built !== item.name) {
+          const prev = setParts.find((p) => p.name === built);
+          if (prev) prev.count += ref.itemCount || 1;
+          else setParts.push({ name: built, count: ref.itemCount || 1, built: true });
+          parts[built] ??= { ducats: 0, sets: [], built: true };
+          if (!parts[built].sets.includes(item.name)) parts[built].sets.push(item.name);
+          continue;
+        }
         const comp = components.get(ref.uniqueName);
         if (!comp || !comp.tradable) continue;
         const rewardNames = new Set((comp.drops || []).filter((d) => /Relic/.test(d.location)).map((d) => d.type));
