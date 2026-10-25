@@ -487,9 +487,13 @@ VIEWS.parts = () => {
     }
     ${
       buildable.length
-        ? `<div class="panel" style="margin-bottom:14px"><h3>You can build right now</h3>
+        ? `<div class="panel" style="margin-bottom:14px"><h3>You can build right now</h3><p class="small muted" style="margin:4px 0 0">You own every part of these sets. Hover one to see the parts, click it to show them below.</p>
            <div class="row" style="margin-top:8px">${buildable
-             .map((s) => `<span class="badge gold">${esc(s)}${state.mastered[DATA.sets[s].id] ? ' · mastered' : ''}</span>`)
+             .map((s) => {
+               // Hover lists the parts behind it, a click filters the table to them to check or fix.
+               const why = DATA.sets[s].parts.map((p) => `${p.name}: ${owned(p.name)} of ${p.count}`).join('\n');
+               return `<button type="button" class="badge gold" data-action="parts-show-set" data-set="${esc(s)}" title="${esc(why)}">${esc(s)}${state.mastered[DATA.sets[s].id] ? ' · mastered' : ''}</button>`;
+             })
              .join('')}</div></div>`
         : ''
     }
@@ -520,6 +524,10 @@ CHANGES['part-count'] = (el) => {
   state.parts[el.dataset.part] = Math.max(0, Math.floor(Number(el.value) || 0));
   if (state.parts[el.dataset.part]) save();
   else save(`Removed ${el.dataset.part}`, true);
+  render();
+};
+ACTIONS['parts-show-set'] = (el) => {
+  Object.assign(ui.parts, { q: el.dataset.set, type: '' });
   render();
 };
 INPUTS['parts-q'] = (el) => {

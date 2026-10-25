@@ -210,3 +210,4 @@ tr.dim td { opacity: 0.55; }
 th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 th.sortable:hover { color: var(--text); }
 th.sorted { color: var(--gold); }
+button.badge { cursor: pointer; border: none; font: inherit; }
