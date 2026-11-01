@@ -462,7 +462,7 @@ VIEWS.parts = () => {
       <td class="num">${n || ''} ${status}</td>
       <td class="num">${fmtD(DATA.parts[p].ducats)}</td>
       <td class="num">${fmtP(priceOf(p))}</td>
-      <td>${sellLink(p)}</td>
+      <td class="row-actions">${sellLink(p)}<button class="small ghost danger" data-action="part-remove" data-part="${esc(p)}" title="Remove ${esc(p)}">✕</button></td>
     </tr>`;
   });
   return `
@@ -524,6 +524,20 @@ CHANGES['part-count'] = (el) => {
   state.parts[el.dataset.part] = Math.max(0, Math.floor(Number(el.value) || 0));
   if (state.parts[el.dataset.part]) save();
   else save(`Removed ${el.dataset.part}`, true);
+  render();
+};
+ACTIONS['part-remove'] = (el) => {
+  checkpoint();
+  delete state.parts[el.dataset.part];
+  save(`Removed ${el.dataset.part}`, true);
+  render();
+};
+// Sold or traded one copy: take it out of the inventory, undoable.
+ACTIONS['part-sold'] = (el) => {
+  const p = el.dataset.part;
+  checkpoint();
+  state.parts[p] = Math.max(0, owned(p) - 1);
+  save(`${p}: ${owned(p)} left`, true);
   render();
 };
 ACTIONS['parts-show-set'] = (el) => {
@@ -949,7 +963,7 @@ VIEWS.trade = () => {
                   <td class="num">${fmtD(r.ducats)}</td>
                   <td class="num">${r.v.ratio == null ? '–' : fmtNum(r.v.ratio, 1)}</td>
                   <td><span class="verdict ${r.v.key}">${r.v.label}</span></td>
-                  <td>${sellLink(r.p)}</td>
+                  <td class="row-actions">${sellLink(r.p)}<button class="small" data-action="part-sold" data-part="${esc(r.p)}" title="Take one out of your inventory">${r.v.key === 'ducat' ? 'Traded' : 'Sold'}</button></td>
                 </tr>`,
               )
               .join('')}</tbody>
