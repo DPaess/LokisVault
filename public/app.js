@@ -756,14 +756,13 @@ ACTIONS['wish-remove-shown'] = (el) => {
 ACTIONS['wish-built'] = (el) => {
   const set = el.dataset.set;
   const s = DATA.sets[set];
-  if (!confirm(`Mark ${set} as built? Its parts you own are removed from your inventory and it is marked as mastered.`)) return;
+  if (!confirm(`Mark ${set} as built? Its parts you own are removed from your inventory.`)) return;
   checkpoint();
   for (const p of s.parts) state.parts[p.name] = Math.max(0, owned(p.name) - p.count);
   state.wishlist = state.wishlist.filter((x) => x !== set);
-  state.mastered[s.id] = true;
   // Built weapons that other sets use (Bronco Prime for Akbronco Prime) are kept as a part you own.
   if (DATA.parts[set]?.built) state.parts[set] = owned(set) + 1;
-  save(`${set} built and marked as mastered`, true);
+  save(`${set} built`, true);
   render();
 };
 
