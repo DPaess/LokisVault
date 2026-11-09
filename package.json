@@ -4,6 +4,7 @@
   "description": "Warframe relic, prime part, wishlist and mastery planner with warframe.market sell or ducat advice",
   "scripts": {
     "build:data": "node scripts/build-data.mjs",
+    "build:farm": "node scripts/build-farm.mjs",
     "fetch:prices": "node scripts/fetch-prices.mjs",
     "serve": "npx --yes http-server public -p 8080 -c-1"
   },

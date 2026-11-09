@@ -34,6 +34,11 @@ jobs:
       - name: Build game data
         run: npm run build:data
 
+      # DE's export or the drop tables can be briefly unavailable, so keep the committed file if so.
+      - name: Build farming data
+        run: npm run build:farm
+        continue-on-error: true
+
       # Prices refresh on the daily schedule and manual runs only. warframe.market can be
       # slow or down, so keep the committed prices if this fails.
       - name: Fetch market prices
