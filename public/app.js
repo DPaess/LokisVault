@@ -10,6 +10,7 @@ const REF_LABEL = { intact: 'Intact', exceptional: 'Exceptional', flawless: 'Fla
 
 const view = document.getElementById('view');
 let DATA = null; // items.json
+let FARM = null; // farm.json: recipes, planet resources, mission rewards (null if it could not load)
 let PRICES = {}; // prices.json -> prices
 let PRICES_AT = null;
 let state = null;
@@ -63,7 +64,7 @@ function toast(msg, undoable = false) {
 
 // ---- State -----------------------------------------------------------------
 
-const emptyState = () => ({ v: 1, savedAt: 0, relics: {}, parts: {}, wishlist: [], mastered: {}, settings: { ducatRatio: 10 } });
+const emptyState = () => ({ v: 1, savedAt: 0, relics: {}, parts: {}, resources: {}, wishlist: [], mastered: {}, settings: { ducatRatio: 10 } });
 
 // Accepts anything JSON shaped and returns a clean state, dropping unknown names and zero counts.
 function sanitize(raw) {
@@ -77,6 +78,10 @@ function sanitize(raw) {
   }
   for (const [name, n] of Object.entries(raw.parts ?? {})) {
     if (DATA.parts[name] && Number(n) > 0) s.parts[name] = Math.floor(Number(n));
+  }
+  // Without farm.json the names cannot be checked, and dropping them would lose the counts.
+  for (const [name, n] of Object.entries(raw.resources ?? {})) {
+    if (Number(n) > 0 && (!FARM || FARM.resources.includes(name))) s.resources[name] = Math.floor(Number(n));
   }
   s.wishlist = [...new Set((Array.isArray(raw.wishlist) ? raw.wishlist : []).filter((n) => DATA.sets[n]))];
   for (const [id, v] of Object.entries(raw.mastered ?? {})) if (v) s.mastered[id] = true;
@@ -196,7 +201,7 @@ const stat = (label, value, sub = '', extra = '') =>
 
 // Long pages render a first batch and grow on demand, instead of drawing hundreds of rows at once.
 // The count resets whenever that page's filters change (filters is any JSON-able value).
-const PAGE_SIZE = { relics: 24, parts: 50, wishlist: 12, mastery: 60, trade: 50 };
+const PAGE_SIZE = { relics: 24, parts: 50, wishlist: 12, mastery: 60, trade: 50, missions: 40 };
 const pages = {}; // key -> { sig, limit }
 function page(key, items, filters = null) {
   const sig = JSON.stringify(filters);
@@ -756,13 +761,172 @@ ACTIONS['wish-remove-shown'] = (el) => {
 ACTIONS['wish-built'] = (el) => {
   const set = el.dataset.set;
   const s = DATA.sets[set];
-  if (!confirm(`Mark ${set} as built? Its parts you own are removed from your inventory.`)) return;
+  if (!confirm(`Mark ${set} as built? The parts and resources it uses are removed from your inventory.`)) return;
   checkpoint();
   for (const p of s.parts) state.parts[p.name] = Math.max(0, owned(p.name) - p.count);
+  for (const [r, n] of Object.entries(FARM?.recipes[set] ?? {})) state.resources[r] = Math.max(0, ownedRes(r) - n);
   state.wishlist = state.wishlist.filter((x) => x !== set);
   // Built weapons that other sets use (Bronco Prime for Akbronco Prime) are kept as a part you own.
   if (DATA.parts[set]?.built) state.parts[set] = owned(set) + 1;
   save(`${set} built`, true);
+  render();
+};
+
+// ---- Resources -----------------------------------------------------------------
+
+const NO_FARM = '<div class="empty">The farming data could not be loaded. Try reloading.</div>';
+const ownedRes = (r) => state.resources[r] ?? 0;
+
+// What the wishlist costs in total: resource name -> amount, part recipes included.
+function resourceNeeds() {
+  const need = {};
+  for (const set of state.wishlist) {
+    for (const [r, n] of Object.entries(FARM.recipes[set] ?? {})) need[r] = (need[r] ?? 0) + n;
+  }
+  return need;
+}
+const shortOf = (need, r) => Math.max(0, (need[r] ?? 0) - ownedRes(r));
+const planetsWith = (r) => Object.keys(FARM.planets).filter((p) => FARM.planets[p].includes(r));
+
+VIEWS.resources = () => {
+  if (!FARM) return NO_FARM;
+  const need = resourceNeeds();
+  const missing = (r) => (need[r] ? shortOf(need, r) / need[r] : 0);
+  const names = [...FARM.resources].sort((a, b) => missing(b) - missing(a) || a.localeCompare(b));
+  const wanted = names.filter((r) => need[r]);
+  const short = wanted.filter((r) => shortOf(need, r) > 0);
+  const rows = names.map((r) => {
+    const gap = shortOf(need, r);
+    const planets = planetsWith(r);
+    return `<tr>
+      <td>${esc(r)}</td>
+      <td><input type="number" min="0" step="1" value="${ownedRes(r)}" data-change="res-count" data-res="${esc(r)}" data-focus="res-${esc(r)}" aria-label="${esc(r)} owned"></td>
+      <td class="num">${fmtNum(need[r] ?? 0)}</td>
+      <td>${gap ? `<span class="badge vault">${fmtNum(gap)}</span>` : need[r] ? '<span class="badge farm">Enough</span>' : '–'}</td>
+      <td class="small muted">${planets.length ? esc(planets.join(', ')) : 'Mission rewards only'}</td>
+      <td><a href="#missions" data-action="res-farm" data-res="${esc(r)}">Where to farm</a></td>
+    </tr>`;
+  });
+  return `
+    ${head('Resources', 'What you own against what your wishlist costs, part recipes included. Credits are not counted.')}
+    <div class="grid stats" style="margin-bottom:14px">
+      ${stat('Still short', `${short.length} of ${wanted.length}`, 'resources your wishlist uses')}
+      ${stat('Wishlist sets', fmtNum(state.wishlist.length))}
+    </div>
+    ${wanted.length ? '' : '<div class="empty" style="margin-bottom:14px">Add sets to your wishlist to see what they cost.</div>'}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Resource</th><th>Owned</th><th class="num">Needed</th><th>Short</th><th>Planets</th><th></th></tr></thead>
+      <tbody>${rows.join('')}</tbody>
+    </table></div>`;
+};
+
+CHANGES['res-count'] = (el) => {
+  checkpoint();
+  state.resources[el.dataset.res] = Math.max(0, Math.floor(Number(el.value) || 0));
+  save(`${el.dataset.res}: ${fmtNum(ownedRes(el.dataset.res))}`, true);
+  render();
+};
+ACTIONS['res-farm'] = (el) => {
+  Object.assign(missionFilter(), { res: el.dataset.res, sort: 'resources', planet: '', dark: false });
+};
+
+// ---- Missions --------------------------------------------------------------------
+
+const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', dark: false, steel: false });
+// Planet resources and drop bonuses apply to enemies and containers on regular star chart nodes.
+const isStarNode = (m) => !/Bounty|Vault|Caches/.test(m.type);
+
+// Three separate signals, each scaled against the best mission so that they can be added together:
+//   drops:   resources you are short of that drop on this planet, times the drop chance bonus
+//   rewards: share of your shortfall that one mission reward covers on average
+//   wish:    chance per reward of a relic and then a part you are missing, at Intact
+function rankMissions(f) {
+  const resNeed = resourceNeeds();
+  const partNeed = needs();
+  const wanted = new Set(f.res ? [f.res] : FARM.resources.filter((r) => shortOf(resNeed, r) > 0));
+  const scored = FARM.missions.map((m) => {
+    const bonus = isStarNode(m) ? m.bonus + (f.steel ? 100 : 0) : 0;
+    const here = isStarNode(m) ? (FARM.planets[m.planet] ?? []).filter((r) => wanted.has(r)) : [];
+    const rewards = m.rewards.filter((x) => wanted.has(x.i)).sort((a, b) => b.e - a.e);
+    const relics = m.rewards
+      .filter((x) => DATA.relics[x.i.replace(/ Relic$/, '')])
+      .map((x) => ({ ...x, relic: x.i.replace(/ Relic$/, ''), value: x.e * wantedChance(x.i.replace(/ Relic$/, ''), 'intact', partNeed) }))
+      .filter((x) => x.value > 0)
+      .sort((a, b) => b.value - a.value);
+    return {
+      m,
+      bonus,
+      here,
+      rewards,
+      relics,
+      drops: here.length * (1 + bonus / 100),
+      reward: sum(rewards.map((x) => Math.min(1, x.e / Math.max(1, shortOf(resNeed, x.i))))),
+      wish: sum(relics.map((x) => x.value)),
+    };
+  });
+  const top = (key) => Math.max(0, ...scored.map((r) => r[key]));
+  const [topDrops, topReward, topWish] = [top('drops'), top('reward'), top('wish')];
+  const scale = (v, max) => (max ? v / max : 0);
+  for (const r of scored) {
+    r.resources = scale(r.drops, topDrops) + scale(r.reward, topReward);
+    r.wishlist = scale(r.wish, topWish);
+    r.score = f.sort === 'resources' ? r.resources : f.sort === 'wishlist' ? r.wishlist : r.resources + r.wishlist;
+  }
+  return scored
+    .filter(
+      (r) =>
+        r.score > 0 &&
+        (!f.res || r.here.length || r.rewards.length) &&
+        (!f.planet || r.m.planet === f.planet) &&
+        (!f.dark || r.m.bonus > 0),
+    )
+    .sort((a, b) => b.score - a.score || b.m.bonus - a.m.bonus || a.m.node.localeCompare(b.m.node));
+}
+
+VIEWS.missions = () => {
+  if (!FARM) return NO_FARM;
+  const f = missionFilter();
+  const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
+  const check = (key, label) =>
+    `<label class="row small"><input type="checkbox" data-change="miss-filter" data-key="${key}"${f[key] ? ' checked' : ''}> ${label}</label>`;
+  const hasGoal = state.wishlist.length > 0 || f.res;
+  const rows = hasGoal ? rankMissions(f) : [];
+  const pg = page('missions', rows, f);
+  const body = pg.items.map((r) => {
+    const shown = r.relics.slice(0, 3);
+    const extra = r.relics.length - shown.length;
+    return `<tr>
+      <td>${esc(r.m.node)}${r.m.bonus ? ' <span class="badge gold">Dark Sector</span>' : ''}
+        <div class="small muted">${esc(r.m.planet)}, ${esc(r.m.type)}</div></td>
+      <td class="num">${r.bonus ? `+${r.bonus}%` : '–'}</td>
+      <td>${r.here.map((x) => `<span class="badge">${esc(x)}</span>`).join(' ') || '–'}</td>
+      <td class="small">${r.rewards.map((x) => `${esc(x.i)} ${fmtNum(x.e, 2)}${x.r ? ` <span class="muted">(best ${esc(x.r)})</span>` : ''}`).join('<br>') || '–'}</td>
+      <td class="small">${shown.map((x) => `<span class="badge void" title="Rotation ${esc(x.r || 'any')}">${esc(x.relic)}</span> ${fmtPct(x.value)}`).join('<br>') || '–'}${extra > 0 ? `<div class="muted">and ${extra} more</div>` : ''}</td>
+      <td class="num">${fmtNum(r.score * 100)}</td>
+    </tr>`;
+  });
+  return `
+    ${head('Missions', 'Where to go for what your wishlist is still missing.')}
+    <p class="note small">Planet drops have no published rates, so they count as how many resources you are short of drop there, raised by the drop bonus. Dark Sector and Steel Path bonuses add together and raise resource drops during the mission, not its reward table. Rewards and relic chances are the average per mission reward, so a long endless reward and a quick capture count the same.</p>
+    <div class="toolbar">
+      <select data-change="miss-filter" data-key="sort" aria-label="Rank by">${opt('both', 'Rank by both', f.sort)}${opt('resources', 'Rank by resources', f.sort)}${opt('wishlist', 'Rank by wishlist relics', f.sort)}</select>
+      <select data-change="miss-filter" data-key="res" aria-label="Resource"><option value="">Everything I am short of</option>${FARM.resources.map((r) => opt(r, r, f.res)).join('')}</select>
+      <select data-change="miss-filter" data-key="planet" aria-label="Planet"><option value="">Any planet</option>${Object.keys(FARM.planets).map((p) => opt(p, p, f.planet)).join('')}</select>
+      ${check('steel', 'Steel Path (+100%)')}
+      ${check('dark', 'Dark Sectors only')}
+    </div>
+    ${
+      rows.length
+        ? `<div class="table-wrap"><table>
+             <thead><tr><th>Mission</th><th class="num">Drop bonus</th><th>Short and drops here</th><th>Avg per reward</th><th>Wishlist relics</th><th class="num">Score</th></tr></thead>
+             <tbody>${body.join('')}</tbody>
+           </table></div>${pg.more}`
+        : `<div class="empty">${hasGoal ? 'No mission matches. Everything may already be covered, or try fewer filters.' : 'Add sets to your wishlist, or pick a resource above.'}</div>`
+    }`;
+};
+
+CHANGES['miss-filter'] = (el) => {
+  missionFilter()[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
   render();
 };
 
@@ -1801,14 +1965,16 @@ function fillSources() {
 
 async function init() {
   try {
-    const [items, prices] = await Promise.all([
+    const [items, prices, farm] = await Promise.all([
       fetch('data/items.json').then((r) => {
         if (!r.ok) throw new Error(`items.json HTTP ${r.status}`);
         return r.json();
       }),
       fetch('data/prices.json').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('data/farm.json').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     DATA = items;
+    FARM = farm;
     PRICES = prices?.prices ?? {};
     PRICES_AT = prices?.generatedAt ?? null;
   } catch (err) {

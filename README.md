@@ -12,7 +12,9 @@ I play Warframe through GeForce Now. The game runs in the cloud, so tools like A
 
 * **Relics**: your relics by refinement (intact, exceptional, flawless, radiant), their rewards with drop chance, price and ducats, parts you still need highlighted, and the expected value of one opening. Relics are tagged as dropping now or vaulted, and can be filtered by type (Lith, Meso, Neo, Axi, Requiem).
 * **Prime parts**: the parts you own, how many your wishlist needs, and which sets you can build right now.
-* **Wishlist**: prime sets you want. Each missing part shows which of your relics drop it, which relics you can farm today, or a warframe.market link when every source is vaulted. Mark a set as built to use up its parts. Search, filter (category, ready or missing parts, vaulted, missing parts in my relics) and sort (closest to done, fewest missing, set price).
+* **Wishlist**: prime sets you want. Each missing part shows which of your relics drop it, which relics you can farm today, or a warframe.market link when every source is vaulted. Mark a set as built to use up its parts and resources. Search, filter (category, ready or missing parts, vaulted, missing parts in my relics) and sort (closest to done, fewest missing, set price).
+* **Resources**: the resources you own against what your wishlist costs, part recipes included, and how much you are short of each.
+* **Missions**: star chart nodes ranked by the resources you are short of, the relics that drop missing wishlist parts, or both. Dark Sector and Steel Path drop bonuses are counted.
 * **Mastery**: every masterable item with mastered or not, remaining mastery points, filters and bulk marking for a quick first fill.
 * **Sell or ducat**: every spare part with its market price, ducat value and a verdict based on a ducats per plat threshold you choose, plus spare sets worth more sold whole.
 * **Data**: add relics, prime parts and mastered items from screenshots (see below), JSON backup and restore, optional sync between devices through a secret Gist on your own GitHub account, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
@@ -54,6 +56,8 @@ Yes. The site never touches the game: no memory reading, no screen capture, no a
 ## Data sources
 
 * [WFCD/warframe-items](https://github.com/WFCD/warframe-items) (`@wfcd/items`): masterable items, prime sets, components and ducats.
+* [DE's Public Export](https://content.warframe.com/PublicExport/index_en.txt.lzma): the recipes behind what each prime set costs.
+* [The Warframe Wiki](https://wiki.warframe.com/): resources per planet and Dark Sector bonuses, kept by hand in `scripts/build-farm.mjs`.
 * [WFCD/warframe-drop-data](https://github.com/WFCD/warframe-drop-data): relic reward tables and current mission drops, from DE's official drop tables.
 * [Tesseract.js](https://github.com/naptha/tesseract.js): in browser text recognition for the screenshot import.
 * [warframe.market](https://warframe.market) API: live sell and buy orders. A price is the lowest sell order from a player who is online or in game, refreshed once a day.
@@ -67,6 +71,7 @@ Requires Node 18 or newer.
 ```sh
 npm ci
 npm run build:data     # writes public/data/items.json
+npm run build:farm     # writes public/data/farm.json, needs python3
 npm run fetch:prices   # writes public/data/prices.json, takes about 10 minutes
 npm run serve          # http://localhost:8080
 ```
@@ -77,6 +82,7 @@ The GitHub Action in `.github/workflows/update-and-deploy.yml` rebuilds the data
 
 ## Known gaps
 
+* The Missions ranking is per reward, not per hour, because nothing publishes how long missions take. Drop rates per planet are not published either, so planet drops only count how many resources you need drop there.
 * Amps, some MOA and Hound parts, Plexus, intrinsics and the star chart are not counted for mastery.
 * Relics only available through Prime Resurgence (Varzia) are not in mission drop tables, so they show as vaulted.
 * Prices refresh once a day, so they lag the live market a little.
