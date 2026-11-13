@@ -420,17 +420,19 @@ export async function readScreens(blobs, onProgress = () => {}) {
         if (line.text.trim()) lines.push(line);
       }
       if (!lines.length) continue;
-      const readCount = async (c) => {
+      const readCount = async (c, minConf = 0.6) => {
         const read = await readLine(reader, rgba, w, { x0: Math.max(0, c.x0), y0: Math.max(0, c.y0), x1: Math.min(w, c.x1), y1: Math.min(h, c.y1) });
-        const m = read.conf > 0.6 ? read.text.match(new RegExp(`(${COUNT})`)) : null;
-        return m && parseCount(m[1]) > 0 ? parseCount(m[1]) : null;
+        const m = read.conf > minConf ? read.text.match(new RegExp(`(${COUNT})`)) : null;
+        return m && parseCount(m[1]) > 0 ? { n: parseCount(m[1]), grouped: /[,.]/.test(m[1]) } : null;
       };
-      // The corner read decides. The wider read only counts when it continues the same number, so
-      // icon art it picks up on relic and part tiles cannot change their counts.
-      let count = await readCount(reg.count);
+      // The corner read decides. When it misses, the digits are read again without the tick.
+      let count = (await readCount(reg.count))?.n ?? (await readCount(reg.digits, 0.9))?.n ?? null;
+      // Counts of a thousand and up are always written with a separator ("8,880") and can run past
+      // the corner. The wider read only counts when it has one, since icon art right after a short
+      // count adds digits ("198" read as "1981").
       if (count != null) {
         const wide = await readCount(reg.countWide);
-        if (wide != null && wide > count && String(wide).startsWith(String(count))) count = wide;
+        if (wide?.grouped && wide.n > count && String(wide.n).startsWith(String(count))) count = wide.n;
       }
       tiles.push({
         text: lines.map((l) => l.text).join(' '),

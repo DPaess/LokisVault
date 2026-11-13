@@ -135,6 +135,13 @@ export function findTiles(v, w, h) {
   if (!rows.length) return [];
   const diffs = rows.slice(1).map((y, i) => y - rows[i]).filter((d) => d >= size && d <= size * 1.7);
   const pitch = diffs.length ? diffs.sort((a, b) => a - b)[diffs.length >> 1] : null;
+  // A half visible row at the bottom can show up off the spacing of the others. Filling the grid
+  // from it would add rows that sit between the real ones, so only rows on the majority's spacing stay.
+  if (pitch) {
+    const fits = (a, b) => Math.abs(b - a - Math.round((b - a) / pitch) * pitch) <= 8;
+    const anchor = rows.reduce((best, r) => (rows.filter((x) => fits(r, x)).length > rows.filter((x) => fits(best, x)).length ? r : best), rows[0]);
+    rows = rows.filter((r) => fits(anchor, r));
+  }
   const all = new Set(rows);
   if (pitch)
     for (const r of rows) {
@@ -159,12 +166,14 @@ export function findTiles(v, w, h) {
     }
     return best;
   };
-  // Merge fills that landed on a found row.
-  const final = kept
-    .map(snap)
-    .sort((a, b) => a - b)
-    .filter((y, i, arr) => i === 0 || y - arr[i - 1] > size * 0.5);
-  return final.flatMap((y0) => xs.map((x0) => ({ x0, y0, x1: x0 + size, y1: y0 + size })));
+  // Merge fills that landed on a found row, keeping the row that was actually seen.
+  const final = [];
+  for (const { y, seen } of kept.map((y0) => ({ y: snap(y0), seen: rows.includes(y0) })).sort((a, b) => a.y - b.y)) {
+    const prev = final[final.length - 1];
+    if (!prev || y - prev.y > size * 0.5) final.push({ y, seen });
+    else if (seen && !prev.seen) final[final.length - 1] = { y, seen };
+  }
+  return final.flatMap(({ y: y0 }) => xs.map((x0) => ({ x0, y0, x1: x0 + size, y1: y0 + size })));
 }
 
 function edgeCoverAt(v, w, x, y0, y1) {
@@ -183,6 +192,8 @@ export function tileRegions(t) {
     count: r(t.x0 + 0.01 * s, t.y0 + 0.01 * s, t.x0 + 0.45 * s, t.y0 + 0.24 * s),
     // Resource stacks ("✓ 714,853") run past the corner, so they are also read across most of the top.
     countWide: r(t.x0 + 0.01 * s, t.y0 + 0.01 * s, t.x0 + 0.9 * s, t.y0 + 0.24 * s),
+    // The digits alone, right of the ✓: a lone "4" next to the tick can come back as "$4" with low confidence.
+    digits: r(t.x0 + 0.17 * s, t.y0 + 0.01 * s, t.x0 + 0.45 * s, t.y0 + 0.24 * s),
     icon: r(t.x0 + 0.2 * s, t.y0 + 0.15 * s, t.x1 - 0.2 * s, t.y0 + 0.6 * s),
   };
 }
