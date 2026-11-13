@@ -808,7 +808,7 @@ VIEWS.resources = () => {
     </tr>`;
   });
   return `
-    ${head('Resources', 'What you own against what your wishlist costs, part recipes included. Credits are not counted.')}
+    ${head('Resources', 'What you own against what your wishlist costs, part recipes included. Credits are not counted. To fill counts from screenshots of Inventory → Resources, use <a href="#data">Data</a>.')}
     <div class="grid stats" style="margin-bottom:14px">
       ${stat('Still short', `${short.length} of ${wanted.length}`, 'resources your wishlist uses')}
       ${stat('Wishlist sets', fmtNum(state.wishlist.length))}
@@ -1251,6 +1251,7 @@ const fuzzyInventory = () =>
       { key: norm(r), value: `relic|${r}` },
       { key: `${norm(r)} relic`, value: `relic|${r}` },
     ]),
+    ...(FARM?.resources ?? []).map((r) => ({ key: norm(r), value: `resource|${r}` })),
     ...Object.keys(DATA.parts).flatMap((p) => [
       { key: norm(p), value: `part|${p}` },
       // "Ash Prime Systems" may lose its "Blueprint" line, but a set's main blueprint must say so.
@@ -1268,6 +1269,8 @@ function matchReadText(text) {
     if (relic) return { kind: 'relic', name: relic, qty: Math.max(1, qty) };
     const part = partIndex().get(norm(rest));
     if (part) return { kind: 'part', name: part, qty: Math.max(1, qty) };
+    const resource = FARM?.resources.find((r) => norm(r) === norm(rest));
+    if (resource) return { kind: 'resource', name: resource, qty: Math.max(1, qty) };
   }
   for (const { qty, rest } of readings) {
     const hit = fuzzyInventory()(norm(rest));
@@ -1373,7 +1376,8 @@ async function runShots(files) {
     const unread = new Set(sh.unread);
     const addRow = ({ key, kind, name, ref, qty, read, sure }) => {
       const prev = rows.get(key);
-      if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, sure: sure || Boolean(prev?.sure), on: true, ok: true, replace: false });
+      // A resource tile shows your whole stack, so by default it replaces the count instead of adding.
+      if (!prev || prev.qty < qty) rows.set(key, { kind, name, ref, qty, read, sure: sure || Boolean(prev?.sure), on: true, ok: true, replace: kind === 'resource' });
     };
     for (const page of pages) {
       if (page.mode === 'tiles') {
@@ -1421,6 +1425,7 @@ async function runShots(files) {
 function shotHave(r) {
   if (r.kind === 'mastery') return masteryItems().some((m) => m.name === r.name && state.mastered[m.id]) ? 1 : 0;
   if (r.kind === 'relic') return state.relics[r.name]?.[r.ref] ?? 0;
+  if (r.kind === 'resource') return ownedRes(r.name);
   return owned(r.name);
 }
 
@@ -1446,7 +1451,7 @@ function shotsPanel() {
       <td>${
         r.kind === 'relic'
           ? `<select data-change="shot-field" data-field="ref" data-i="${i}" aria-label="Refinement">${REFS.map((x) => `<option value="${x}"${r.ref === x ? ' selected' : ''}>${REF_LABEL[x]}</option>`).join('')}</select>`
-          : `<span class="muted small">${r.kind === 'mastery' ? 'Mastered' : 'Part'}</span>`
+          : `<span class="muted small">${{ mastery: 'Mastered', resource: 'Resource' }[r.kind] ?? 'Part'}</span>`
       }</td>
       <td class="num">${r.kind === 'mastery' ? '' : `<input type="number" min="1" value="${r.qty}" data-change="shot-field" data-field="qty" data-i="${i}" data-focus="shot-qty:${i}" aria-label="Quantity">`}</td>
       <td>${vaultCell(r, i)}</td>
@@ -1457,7 +1462,8 @@ function shotsPanel() {
     <div class="panel">
       <h3>Add from screenshots</h3>
       <p class="small muted">Take screenshots in game (the GeForce Now overlay or your system's screenshot key both work), then choose them here, drop them on the box or paste one with Ctrl+V.
-        Works with Inventory → Prime Parts, Void Relics, and Profile → Equipment for mastery (items showing MAX RANK are marked mastered).
+        Works with Inventory → Prime Parts, Void Relics, Resources, and Profile → Equipment for mastery (items showing MAX RANK are marked mastered).
+        Resources read are the ones your prime sets use, and they replace your count since the screen shows the whole stack.
         The text is read on your device and the images are never uploaded. The first time, the reader downloads about 28 MB (then it is cached).
         Text recognition makes mistakes, so check names and quantities before adding.</p>
       <div class="drop" data-drop>
@@ -1530,6 +1536,8 @@ ACTIONS['shots-add'] = () => {
     } else if (r.kind === 'relic') {
       const c = (state.relics[r.name] ??= {});
       c[r.ref] = (r.replace ? 0 : (c[r.ref] ?? 0)) + r.qty;
+    } else if (r.kind === 'resource') {
+      state.resources[r.name] = (r.replace ? 0 : ownedRes(r.name)) + r.qty;
     } else state.parts[r.name] = (r.replace ? 0 : owned(r.name)) + r.qty;
   }
   ui.shots.rows = ui.shots.rows.filter((r) => !(r.on && r.ok));

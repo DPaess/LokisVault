@@ -164,10 +164,14 @@ const median = (xs) => {
 // Stack counts read "x4" on relics and "✓ 2" on prime parts, where the tick comes back as a symbol
 // such as "@2". A bare number is not trusted as a count: it is more often a relic code ("Neo 02")
 // or a stray read off an item icon.
+// Resource stacks run into the thousands and show a separator ("12,345"), so the separator
+// between groups of three digits is read too.
+const COUNT = '\\d{1,3}(?:[,.]\\d{3})+|\\d{1,6}';
+export const parseCount = (s) => Number(String(s).replace(/[,.]/g, ''));
 const countOf = (w) => {
-  const m = w.text.trim().match(/^(?:[x×]|[@©®✓√]+)?\s*(\d{1,3})$/i);
+  const m = w.text.trim().match(new RegExp(`^(?:[x×]|[@©®✓√]+)?\\s*(${COUNT})$`, 'i'));
   if (!m) return null;
-  const n = Number(m[1]);
+  const n = parseCount(m[1]);
   if (n < 1) return null;
   // Engines that read whole lines keep codes like "Neo 02" together, so a lone number is a count,
   // but icons (the era filter's ∞, the eye on unowned relics) also come back as faint digits.
@@ -418,11 +422,11 @@ export async function readScreens(blobs, onProgress = () => {}) {
       if (!lines.length) continue;
       const c = reg.count;
       const countRead = await readLine(reader, rgba, w, { x0: Math.max(0, c.x0), y0: Math.max(0, c.y0), x1: Math.min(w, c.x1), y1: Math.min(h, c.y1) });
-      const m = countRead.conf > 0.6 ? countRead.text.match(/(\d{1,3})/) : null;
+      const m = countRead.conf > 0.6 ? countRead.text.match(new RegExp(`(${COUNT})`)) : null;
       tiles.push({
         text: lines.map((l) => l.text).join(' '),
         conf: Math.min(...lines.map((l) => l.conf)),
-        count: m && Number(m[1]) > 0 ? Number(m[1]) : null,
+        count: m && parseCount(m[1]) > 0 ? parseCount(m[1]) : null,
         light: lightIn(v, w, reg.icon),
         box: t,
       });
