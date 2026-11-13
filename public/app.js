@@ -882,6 +882,9 @@ function rankMissions(f) {
     // exception: it can only be played in normal mode.
     const steel = fissure ? fissure.hard : true;
     const bonus = ground ? m.bonus + (steel ? 100 : 0) : 0;
+    // Where the bonus comes from, or why there is none, for the Drop bonus column.
+    const bonusParts = ground ? [...(steel ? ['Steel Path +100%'] : []), ...(m.bonus ? [`Dark Sector +${m.bonus}%`] : [])] : [];
+    const noBonus = !ground ? (m.storm ? 'Railjack' : 'Rewards only') : fissure && !steel ? 'Normal mode' : '';
     const here = ground ? (FARM.planets[m.planet] ?? []).filter((r) => wanted.has(r)) : [];
     const rewards = m.rewards.filter((x) => wanted.has(x.i)).sort((a, b) => b.e - a.e);
     const relics = m.rewards
@@ -895,6 +898,8 @@ function rankMissions(f) {
       fissure,
       crack,
       bonus,
+      bonusParts,
+      noBonus,
       here,
       rewards,
       relics,
@@ -1039,7 +1044,7 @@ VIEWS.missions = () => {
           : ''
       }
         <div class="small muted">${esc(r.m.planet)}, ${esc(r.fissure?.type || r.m.type)}${r.fissure ? `, ends in ${endsIn(r.fissure.expiry - now)}` : ''}</div></td>
-      <td class="num">${r.bonus ? `+${r.bonus}%` : '–'}</td>
+      <td class="num">${r.bonus ? `<b>+${r.bonus}%</b><div class="small muted">${r.bonusParts.map(esc).join('<br>')}</div>` : `<span class="small muted">${esc(r.noBonus || '–')}</span>`}</td>
       <td>${r.here.map((x) => `<span class="badge">${esc(x)}</span>`).join(' ') || '–'}</td>
       <td class="small">${r.rewards.map((x) => `${esc(x.i)} ${fmtNum(x.e, 2)}${x.r ? ` <span class="muted">(best ${esc(x.r)})</span>` : ''}`).join('<br>') || '–'}</td>
       <td class="small">${shown.map((x) => `<span class="badge void" title="Rotation ${esc(x.r || 'any')}">${esc(x.relic)}</span> ${fmtPct(x.value)}`).join('<br>') || '–'}${extra > 0 ? `<div class="muted">and ${extra} more</div>` : ''}</td>
