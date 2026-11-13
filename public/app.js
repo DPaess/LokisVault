@@ -832,7 +832,7 @@ ACTIONS['res-farm'] = (el) => {
 
 // ---- Missions --------------------------------------------------------------------
 
-const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', kind: '', q: '', dark: false, steel: false, fmode: '', fmine: false });
+const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', kind: '', q: '', dark: false, steel: false, fiss: '' });
 // Tiers and phases ("Level 40 - 60 Cetus Bounty", "PROFIT-TAKER - PHASE 2", the Arena risk levels)
 // are one kind each in the type filter.
 const missionKind = (m) =>
@@ -848,29 +848,59 @@ const isStarNode = (m) => !/Bounty|Vault|Caches/.test(m.type);
 //   drops:   resources you are short of that drop on this planet, times the drop chance bonus
 //   rewards: share of your shortfall that one mission reward covers on average
 //   wish:    chance per reward of a relic and then a part you are missing, at Intact
+// An open fissure as a mission row: the node's normal mission (same planet drops and reward table)
+// plus the relic you crack at the end. Void Storms are Railjack nodes, without planet resources.
+const FISSURE_TYPE = { Extermination: 'Exterminate' };
+function fissureMission(x) {
+  const normal = !x.storm && FARM.missions.find((m) => m.planet === x.planet && m.node === x.node && isStarNode(m));
+  return normal || { planet: x.planet, node: x.node, type: FISSURE_TYPE[x.type] ?? x.type, bonus: 0, rewards: [], storm: x.storm };
+}
+
+// The best crack a fissure offers: of your relics that fit it, the one most likely to give a part
+// your wishlist is missing, at the refinement you own.
+function bestCrack(tier, need) {
+  return relicsForTier(tier, need)
+    .wanted.map((relic) => ({ relic, ref: bestRef(relic), chance: wantedChance(relic, bestRef(relic), need) }))
+    .sort((a, b) => b.chance - a.chance)[0] ?? null;
+}
+
+const FISSURE_MODES = { only: () => true, normal: (x) => !x.hard && !x.storm, hard: (x) => x.hard, storm: (x) => x.storm };
+
 function rankMissions(f) {
   const q = norm(f.q);
   const resNeed = resourceNeeds();
   const partNeed = needs();
   const wanted = new Set(f.res ? [f.res] : FARM.resources.filter((r) => shortOf(resNeed, r) > 0));
-  const scored = FARM.missions.map((m) => {
-    const bonus = isStarNode(m) ? m.bonus + (f.steel ? 100 : 0) : 0;
-    const here = isStarNode(m) ? (FARM.planets[m.planet] ?? []).filter((r) => wanted.has(r)) : [];
+  const now = Date.now();
+  const entries = [
+    ...FARM.missions.map((m) => ({ m, fissure: null })),
+    ...(fissures.list ?? []).filter((x) => x.expiry > now).map((x) => ({ m: fissureMission(x), fissure: x })),
+  ];
+  const scored = entries.map(({ m, fissure }) => {
+    const ground = isStarNode(m) && !m.storm;
+    // A Steel Path fissure is always Steel Path; the checkbox is for the normal missions.
+    const steel = fissure ? fissure.hard : f.steel;
+    const bonus = ground ? m.bonus + (steel ? 100 : 0) : 0;
+    const here = ground ? (FARM.planets[m.planet] ?? []).filter((r) => wanted.has(r)) : [];
     const rewards = m.rewards.filter((x) => wanted.has(x.i)).sort((a, b) => b.e - a.e);
     const relics = m.rewards
       .filter((x) => DATA.relics[x.i.replace(/ Relic$/, '')])
       .map((x) => ({ ...x, relic: x.i.replace(/ Relic$/, ''), value: x.e * wantedChance(x.i.replace(/ Relic$/, ''), 'intact', partNeed) }))
       .filter((x) => x.value > 0)
       .sort((a, b) => b.value - a.value);
+    const crack = fissure ? bestCrack(fissure.tier, partNeed) : null;
     return {
       m,
+      fissure,
+      crack,
       bonus,
       here,
       rewards,
       relics,
       drops: here.length * (1 + bonus / 100),
       reward: sum(rewards.map((x) => Math.min(1, x.e / Math.max(1, shortOf(resNeed, x.i))))),
-      wish: sum(relics.map((x) => x.value)),
+      // Same unit for both: percent chance of a missing part per run.
+      wish: sum(relics.map((x) => x.value)) + (crack?.chance ?? 0),
     };
   });
   const top = (key) => Math.max(0, ...scored.map((r) => r[key]));
@@ -881,17 +911,20 @@ function rankMissions(f) {
     r.wishlist = scale(r.wish, topWish);
     r.score = f.sort === 'resources' ? r.resources : f.sort === 'wishlist' ? r.wishlist : r.resources + r.wishlist;
   }
+  const onlyFissures = FISSURE_MODES[f.fiss];
   return scored
     .filter(
       (r) =>
-        r.score > 0 &&
+        // Filtering to fissures lists every one of them, even those that help with nothing.
+        (r.score > 0 || (onlyFissures && r.fissure)) &&
+        (f.fiss === 'none' ? !r.fissure : !onlyFissures || (r.fissure && onlyFissures(r.fissure))) &&
         (!f.res || r.here.length || r.rewards.length) &&
         (!f.planet || r.m.planet === f.planet) &&
         (!f.kind || missionKind(r.m) === f.kind) &&
         (!q || norm(`${r.m.node} ${r.m.planet} ${r.m.type}`).includes(q)) &&
         (!f.dark || r.m.bonus > 0),
     )
-    .sort((a, b) => b.score - a.score || b.m.bonus - a.m.bonus || a.m.node.localeCompare(b.m.node));
+    .sort((a, b) => b.score - a.score || b.m.bonus - a.m.bonus || a.m.node.localeCompare(b.m.node) || Boolean(a.fissure) - Boolean(b.fissure));
 }
 
 // ---- Void Fissures ---------------------------------------------------------------
@@ -974,64 +1007,12 @@ function relicsForTier(tier, need) {
   return { count: sum(names.map(relicTotal)), wanted };
 }
 
-function fissurePanel(f) {
-  if (!fissures.list && !fissures.busy && !fissures.error) loadFissures();
-  const need = needs();
-  const resNeed = resourceNeeds();
-  const now = Date.now();
-  const rows = (fissures.list ?? [])
-    .filter((x) => x.expiry > now)
-    .filter((x) => !f.fmode || (f.fmode === 'hard' ? x.hard : f.fmode === 'storm' ? x.storm : !x.hard && !x.storm))
-    .map((x) => ({ ...x, mine: relicsForTier(x.tier, need) }))
-    .filter((x) => !f.fmine || x.mine.wanted.length)
-    .sort((a, b) => FISSURE_TIERS.indexOf(a.tier) - FISSURE_TIERS.indexOf(b.tier) || b.mine.wanted.length - a.mine.wanted.length || a.expiry - b.expiry);
-  const body = rows.map((x) => {
-    // Void Storms are Railjack missions, where planet resources do not drop.
-    const short = x.storm ? [] : (FARM.planets[x.planet] ?? []).filter((r) => shortOf(resNeed, r) > 0);
-    return `<tr>
-      <td><span class="badge void">${esc(x.tier)}</span></td>
-      <td>${esc(x.node)}${x.hard ? ' <span class="badge gold">Steel Path</span>' : ''}${x.storm ? ' <span class="badge">Void Storm</span>' : ''}
-        <div class="small muted">${esc(x.planet)}, ${esc(x.type)}${x.enemy ? `, ${esc(x.enemy)}` : ''}</div></td>
-      <td class="num">${endsIn(x.expiry - now)}</td>
-      <td class="small">${x.mine.count ? `${fmtNum(x.mine.count)} owned` : '<span class="muted">None owned</span>'}${
-        x.mine.wanted.length
-          ? `<div><span class="badge farm">${x.mine.wanted.length} with wanted parts</span> <span class="muted">${esc(x.mine.wanted.slice(0, 3).join(', '))}${x.mine.wanted.length > 3 ? '…' : ''}</span></div>`
-          : ''
-      }</td>
-      <td>${short.map((r) => `<span class="badge">${esc(r)}</span>`).join(' ') || '–'}</td>
-    </tr>`;
-  });
-  const opt = (v, l) => `<option value="${v}"${f.fmode === v ? ' selected' : ''}>${l}</option>`;
-  const status = fissures.busy
-    ? 'Loading…'
-    : fissures.error
-      ? `<span class="warn">Could not load fissures (${esc(fissures.error)}).</span>`
-      : fissures.at
-        ? `Updated ${new Date(fissures.at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })} from ${fissures.source === 'DE' ? "DE's world state" : 'WFCD'}`
-        : '';
-  return `
-    <div class="panel" style="margin-bottom:14px">
-      <div class="row" style="justify-content:space-between">
-        <h3 style="margin:0">Void Fissures now</h3>
-        <span class="row"><span class="small muted">${status}</span>
-          <button class="small" data-action="fissures-refresh" ${fissures.busy ? 'disabled' : ''}>Refresh</button></span>
-      </div>
-      <div class="toolbar" style="margin-top:10px">
-        <select data-change="miss-filter" data-key="fmode" aria-label="Fissure kind">${opt('', 'All fissures')}${opt('normal', 'Normal')}${opt('hard', 'Steel Path')}${opt('storm', 'Void Storms')}</select>
-        <label class="row small"><input type="checkbox" data-change="miss-filter" data-key="fmine"${f.fmine ? ' checked' : ''}> Only where my relics have wanted parts</label>
-      </div>
-      ${
-        rows.length
-          ? `<div class="table-wrap"><table>
-               <thead><tr><th>Relic</th><th>Mission</th><th class="num">Ends in</th><th>Your relics</th><th>Short and drops here</th></tr></thead>
-               <tbody>${body.join('')}</tbody>
-             </table></div>`
-          : fissures.list
-            ? '<div class="empty">No fissure matches these filters.</div>'
-            : ''
-      }
-      <p class="small muted" style="margin:8px 0 0">From the public world state: DE's own feed when your browser is allowed to read it, otherwise WFCD's copy at api.warframestat.us. Times count from when the list was loaded, press Refresh for the current rotation.</p>
-    </div>`;
+function fissureStatus() {
+  if (fissures.busy) return 'Loading fissures…';
+  if (fissures.error) return `<span class="warn">Could not load fissures (${esc(fissures.error)}).</span>`;
+  if (!fissures.at) return '';
+  const open = (fissures.list ?? []).filter((x) => x.expiry > Date.now()).length;
+  return `${open} fissures, updated ${new Date(fissures.at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })} from ${fissures.source === 'DE' ? "DE's world state" : 'WFCD'}`;
 }
 
 ACTIONS['fissures-refresh'] = () => loadFissures();
@@ -1042,26 +1023,38 @@ VIEWS.missions = () => {
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
   const check = (key, label) =>
     `<label class="row small"><input type="checkbox" data-change="miss-filter" data-key="${key}"${f[key] ? ' checked' : ''}> ${label}</label>`;
-  const hasGoal = state.wishlist.length > 0 || f.res;
+  if (!fissures.list && !fissures.busy && !fissures.error) loadFissures();
+  const hasGoal = state.wishlist.length > 0 || f.res || FISSURE_MODES[f.fiss];
   const rows = hasGoal ? rankMissions(f) : [];
+  const now = Date.now();
   const pg = page('missions', rows, f);
   const body = pg.items.map((r) => {
     const shown = r.relics.slice(0, 3);
     const extra = r.relics.length - shown.length;
     return `<tr>
-      <td>${esc(r.m.node)}${r.m.bonus ? ' <span class="badge gold">Dark Sector</span>' : ''}
-        <div class="small muted">${esc(r.m.planet)}, ${esc(r.m.type)}</div></td>
+      <td>${esc(r.m.node)}${r.m.bonus ? ' <span class="badge gold">Dark Sector</span>' : ''}${
+        r.fissure
+          ? ` <span class="badge void">${esc(r.fissure.tier)} fissure</span>${r.fissure.hard ? ' <span class="badge gold">Steel Path</span>' : ''}${r.fissure.storm ? ' <span class="badge">Void Storm</span>' : ''}`
+          : ''
+      }
+        <div class="small muted">${esc(r.m.planet)}, ${esc(r.fissure?.type || r.m.type)}${r.fissure ? `, ends in ${endsIn(r.fissure.expiry - now)}` : ''}</div></td>
       <td class="num">${r.bonus ? `+${r.bonus}%` : '–'}</td>
       <td>${r.here.map((x) => `<span class="badge">${esc(x)}</span>`).join(' ') || '–'}</td>
       <td class="small">${r.rewards.map((x) => `${esc(x.i)} ${fmtNum(x.e, 2)}${x.r ? ` <span class="muted">(best ${esc(x.r)})</span>` : ''}`).join('<br>') || '–'}</td>
       <td class="small">${shown.map((x) => `<span class="badge void" title="Rotation ${esc(x.r || 'any')}">${esc(x.relic)}</span> ${fmtPct(x.value)}`).join('<br>') || '–'}${extra > 0 ? `<div class="muted">and ${extra} more</div>` : ''}</td>
+      <td class="small">${
+        !r.fissure
+          ? '–'
+          : r.crack
+            ? `<span class="badge void">${esc(r.crack.relic)}</span> ${fmtPct(r.crack.chance)}${r.crack.ref !== 'intact' ? ` <span class="muted">${esc(REF_LABEL[r.crack.ref])}</span>` : ''}`
+            : '<span class="muted">No relic of yours with a wanted part</span>'
+      }</td>
       <td class="num">${fmtNum(r.score * 100)}</td>
     </tr>`;
   });
   return `
     ${head('Missions', 'Where to go for what your wishlist is still missing.')}
-    ${fissurePanel(f)}
-    <p class="note small">Planet drops have no published rates, so they count as how many resources you are short of drop there, raised by the drop bonus. Dark Sector and Steel Path bonuses add together and raise resource drops during the mission, not its reward table. Rewards and relic chances are the average per mission reward, so a long endless reward and a quick capture count the same.</p>
+    <p class="note small">Planet drops have no published rates, so they count as how many resources you are short of drop there, raised by the drop bonus. Dark Sector and Steel Path bonuses add together and raise resource drops during the mission, not its reward table. Rewards and relic chances are the average per mission reward, so a long endless reward and a quick capture count the same. Open Void Fissures are listed next to the normal missions: same drops and rewards, plus the relic you crack, counted as your best relic of that tier for a missing part.</p>
     <div class="toolbar">
       <input class="grow" type="search" placeholder="Search node or planet" value="${esc(f.q)}" data-input="miss-q" data-focus="miss-q" aria-label="Search missions">
       <select data-change="miss-filter" data-key="kind" aria-label="Mission type"><option value="">Any mission type</option>${[...new Set(FARM.missions.map(missionKind))].sort().map((k) => opt(k, k, f.kind)).join('')}</select>
@@ -1071,10 +1064,15 @@ VIEWS.missions = () => {
       ${check('steel', 'Steel Path (+100%)')}
       ${check('dark', 'Dark Sectors only')}
     </div>
+    <div class="toolbar">
+      <select data-change="miss-filter" data-key="fiss" aria-label="Fissures">${opt('', 'Missions and fissures', f.fiss)}${opt('only', 'Only fissures', f.fiss)}${opt('normal', 'Only normal fissures', f.fiss)}${opt('hard', 'Only Steel Path fissures', f.fiss)}${opt('storm', 'Only Void Storms', f.fiss)}${opt('none', 'No fissures', f.fiss)}</select>
+      <span class="small muted">${fissureStatus()}</span>
+      <button class="small" data-action="fissures-refresh" ${fissures.busy ? 'disabled' : ''}>Refresh fissures</button>
+    </div>
     ${
       rows.length
         ? `<div class="table-wrap"><table>
-             <thead><tr><th>Mission</th><th class="num">Drop bonus</th><th>Short and drops here</th><th>Avg per reward</th><th>Wishlist relics</th><th class="num">Score</th></tr></thead>
+             <thead><tr><th>Mission</th><th class="num">Drop bonus</th><th>Short and drops here</th><th>Avg per reward</th><th>Wishlist relics</th><th>Fissure crack</th><th class="num">Score</th></tr></thead>
              <tbody>${body.join('')}</tbody>
            </table></div>${pg.more}`
         : `<div class="empty">${hasGoal ? 'No mission matches. Everything may already be covered, or try fewer filters.' : 'Add sets to your wishlist, or pick a resource above.'}</div>`
