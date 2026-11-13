@@ -1,6 +1,7 @@
 // Builds public/data/farm.json, the data behind the Resources and Missions tabs:
 //   * DE Public Export (ExportRecipes)  -> resources each prime set costs, part recipes included
 //   * WFCD/warframe-drop-data           -> mission rewards for those resources and for relics
+//   * WFCD/warframe-worldstate-data     -> node and mission type names, to decode DE's world state
 //   * the tables below                  -> planet resources and Dark Sector bonuses
 // Needs public/data/items.json (run build-data.mjs first) and python3 (see decodeIndex).
 // Run with: node scripts/build-farm.mjs
@@ -17,6 +18,7 @@ const OUT = path.join(ROOT, 'public', 'data', 'farm.json');
 const JSON_DIR = path.join(ROOT, 'node_modules', '@wfcd', 'items', 'data', 'json');
 const EXPORT_BASE = 'https://content.warframe.com/PublicExport';
 const DROPS = 'https://raw.githubusercontent.com/WFCD/warframe-drop-data/main/data/all.slim.json';
+const WORLDSTATE_DATA = 'https://raw.githubusercontent.com/WFCD/warframe-worldstate-data/master/data';
 
 // Resources that enemies and containers drop on each planet. No data feed has this, so it is kept
 // by hand from https://wiki.warframe.com/w/Planet ("Region Resources").
@@ -156,7 +158,20 @@ function buildMissions(slim, wanted) {
 
 async function main() {
   const items = JSON.parse(await readFile(ITEMS, 'utf8'));
-  const [recipeMap, slim] = await Promise.all([loadRecipes(), fetchOk(DROPS).then((r) => r.json())]);
+  const [recipeMap, slim, solNodes, missionTypes] = await Promise.all([
+    loadRecipes(),
+    fetchOk(DROPS).then((r) => r.json()),
+    fetchOk(`${WORLDSTATE_DATA}/solNodes.json`).then((r) => r.json()),
+    fetchOk(`${WORLDSTATE_DATA}/missionTypes.json`).then((r) => r.json()),
+  ]);
+  // DE's world state names nodes and mission types by code ("SolNode205", "MT_EXTERMINATION").
+  // nodes: code -> [node, planet, enemy, mission type]
+  const nodes = {};
+  for (const [id, n] of Object.entries(solNodes)) {
+    const m = String(n.value ?? '').match(/^(.*) \((.*)\)$/);
+    if (m) nodes[id] = [m[1], m[2], n.enemy ?? '', n.type ?? ''];
+  }
+  const types = Object.fromEntries(Object.entries(missionTypes).map(([k, v]) => [k, v.value]));
 
   const names = resourceNames();
   const setIds = new Set(Object.values(items.sets).map((s) => s.id));
@@ -177,11 +192,13 @@ async function main() {
 
   const out = {
     generatedAt: new Date().toISOString(),
-    sources: { recipes: 'DE Public Export', drops: 'WFCD/warframe-drop-data', planets: 'wiki.warframe.com' },
+    sources: { recipes: 'DE Public Export', drops: 'WFCD/warframe-drop-data', planets: 'wiki.warframe.com', nodes: 'WFCD/warframe-worldstate-data' },
     resources,
     recipes,
     planets: PLANETS,
     missions,
+    nodes,
+    missionTypes: types,
   };
 
   // Skip the write when only the timestamp would change, so the daily job commits real changes only.

@@ -832,7 +832,7 @@ ACTIONS['res-farm'] = (el) => {
 
 // ---- Missions --------------------------------------------------------------------
 
-const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', kind: '', q: '', dark: false, steel: false });
+const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', kind: '', q: '', dark: false, steel: false, fmode: '', fmine: false });
 // Tiers and phases ("Level 40 - 60 Cetus Bounty", "PROFIT-TAKER - PHASE 2", the Arena risk levels)
 // are one kind each in the type filter.
 const missionKind = (m) =>
@@ -894,6 +894,148 @@ function rankMissions(f) {
     .sort((a, b) => b.score - a.score || b.m.bonus - a.m.bonus || a.m.node.localeCompare(b.m.node));
 }
 
+// ---- Void Fissures ---------------------------------------------------------------
+// The live fissure list is read on demand, when Missions first opens and when Refresh is pressed.
+// It comes from the public world state: DE's own feed when the browser may read it, otherwise
+// WFCD's copy of it. Neither needs an account, and neither touches the game.
+// DE's feed does not allow reads from other sites yet (no CORS header), so today the request is
+// blocked and WFCD answers. Once DE allows it, DE's feed is used with no change here.
+
+const DE_WORLDSTATE = 'https://api.warframe.com/cdn/worldState.php';
+const WFCD_FISSURES = 'https://api.warframestat.us/pc/fissures?language=en';
+const fissures = { list: null, at: null, busy: false, error: '', source: '' };
+const FISSURE_TIERS = ['Lith', 'Meso', 'Neo', 'Axi', 'Requiem', 'Omnia'];
+
+const deDate = (d) => Number(d?.$date?.$numberLong ?? d?.$date ?? 0) || 0;
+const voidTier = (code) => FISSURE_TIERS[Number(String(code ?? '').replace('VoidT', '')) - 1];
+
+// DE's codes, named through farm.json (built from WFCD's node and mission type tables).
+function fromDE(ws) {
+  const out = [];
+  const add = (x, tier, storm) => {
+    const [node, planet, enemy, nodeType] = FARM?.nodes?.[x.Node] ?? [];
+    if (!tier || !node) return;
+    const type = FARM.missionTypes?.[x.MissionType] ?? nodeType;
+    out.push({ id: x._id?.$oid ?? x.Node, node, planet, type, enemy, tier, hard: Boolean(x.Hard), storm, expiry: deDate(x.Expiry) });
+  };
+  for (const x of ws.ActiveMissions ?? []) add(x, voidTier(x.Modifier), false);
+  for (const x of ws.VoidStorms ?? []) add(x, voidTier(x.ActiveMissionTier), true);
+  if (!out.length) throw new Error('no fissures in DE world state');
+  return out;
+}
+
+function fromWFCD(data) {
+  if (!Array.isArray(data)) throw new Error('unexpected answer');
+  return data
+    .filter((x) => x && typeof x.node === 'string' && FISSURE_TIERS.includes(x.tier))
+    .map((x) => {
+      const [, node = x.node, planet = ''] = x.node.match(/^(.*) \((.*)\)$/) ?? [];
+      return { id: x.id, node, planet, type: String(x.missionType ?? ''), enemy: String(x.enemy ?? ''), tier: x.tier, hard: Boolean(x.isHard), storm: Boolean(x.isStorm), expiry: Date.parse(x.expiry) || 0 };
+    });
+}
+
+async function getJson(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function loadFissures() {
+  if (fissures.busy) return;
+  fissures.busy = true;
+  if (currentTab() === 'missions') render();
+  try {
+    try {
+      fissures.list = fromDE(await getJson(DE_WORLDSTATE));
+      fissures.source = 'DE';
+    } catch {
+      fissures.list = fromWFCD(await getJson(WFCD_FISSURES));
+      fissures.source = 'WFCD';
+    }
+    fissures.at = Date.now();
+    fissures.error = '';
+  } catch (err) {
+    fissures.error = err.message;
+  } finally {
+    fissures.busy = false;
+    if (currentTab() === 'missions') render();
+  }
+}
+
+const endsIn = (ms) => {
+  const min = Math.max(0, Math.round(ms / 60000));
+  return min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
+};
+
+// Your relics that fit a fissure: Omnia takes any relic, the others their own era.
+function relicsForTier(tier, need) {
+  const names = Object.keys(state.relics).filter((n) => DATA.relics[n] && (tier === 'Omnia' || DATA.relics[n].era === tier));
+  const wanted = names.filter((n) => wantedChance(n, bestRef(n), need) > 0);
+  return { count: sum(names.map(relicTotal)), wanted };
+}
+
+function fissurePanel(f) {
+  if (!fissures.list && !fissures.busy && !fissures.error) loadFissures();
+  const need = needs();
+  const resNeed = resourceNeeds();
+  const now = Date.now();
+  const rows = (fissures.list ?? [])
+    .filter((x) => x.expiry > now)
+    .filter((x) => !f.fmode || (f.fmode === 'hard' ? x.hard : f.fmode === 'storm' ? x.storm : !x.hard && !x.storm))
+    .map((x) => ({ ...x, mine: relicsForTier(x.tier, need) }))
+    .filter((x) => !f.fmine || x.mine.wanted.length)
+    .sort((a, b) => FISSURE_TIERS.indexOf(a.tier) - FISSURE_TIERS.indexOf(b.tier) || b.mine.wanted.length - a.mine.wanted.length || a.expiry - b.expiry);
+  const body = rows.map((x) => {
+    // Void Storms are Railjack missions, where planet resources do not drop.
+    const short = x.storm ? [] : (FARM.planets[x.planet] ?? []).filter((r) => shortOf(resNeed, r) > 0);
+    return `<tr>
+      <td><span class="badge void">${esc(x.tier)}</span></td>
+      <td>${esc(x.node)}${x.hard ? ' <span class="badge gold">Steel Path</span>' : ''}${x.storm ? ' <span class="badge">Void Storm</span>' : ''}
+        <div class="small muted">${esc(x.planet)}, ${esc(x.type)}${x.enemy ? `, ${esc(x.enemy)}` : ''}</div></td>
+      <td class="num">${endsIn(x.expiry - now)}</td>
+      <td class="small">${x.mine.count ? `${fmtNum(x.mine.count)} owned` : '<span class="muted">None owned</span>'}${
+        x.mine.wanted.length
+          ? `<div><span class="badge farm">${x.mine.wanted.length} with wanted parts</span> <span class="muted">${esc(x.mine.wanted.slice(0, 3).join(', '))}${x.mine.wanted.length > 3 ? '…' : ''}</span></div>`
+          : ''
+      }</td>
+      <td>${short.map((r) => `<span class="badge">${esc(r)}</span>`).join(' ') || '–'}</td>
+    </tr>`;
+  });
+  const opt = (v, l) => `<option value="${v}"${f.fmode === v ? ' selected' : ''}>${l}</option>`;
+  const status = fissures.busy
+    ? 'Loading…'
+    : fissures.error
+      ? `<span class="warn">Could not load fissures (${esc(fissures.error)}).</span>`
+      : fissures.at
+        ? `Updated ${new Date(fissures.at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })} from ${fissures.source === 'DE' ? "DE's world state" : 'WFCD'}`
+        : '';
+  return `
+    <div class="panel" style="margin-bottom:14px">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">Void Fissures now</h3>
+        <span class="row"><span class="small muted">${status}</span>
+          <button class="small" data-action="fissures-refresh" ${fissures.busy ? 'disabled' : ''}>Refresh</button></span>
+      </div>
+      <div class="toolbar" style="margin-top:10px">
+        <select data-change="miss-filter" data-key="fmode" aria-label="Fissure kind">${opt('', 'All fissures')}${opt('normal', 'Normal')}${opt('hard', 'Steel Path')}${opt('storm', 'Void Storms')}</select>
+        <label class="row small"><input type="checkbox" data-change="miss-filter" data-key="fmine"${f.fmine ? ' checked' : ''}> Only where my relics have wanted parts</label>
+      </div>
+      ${
+        rows.length
+          ? `<div class="table-wrap"><table>
+               <thead><tr><th>Relic</th><th>Mission</th><th class="num">Ends in</th><th>Your relics</th><th>Short and drops here</th></tr></thead>
+               <tbody>${body.join('')}</tbody>
+             </table></div>`
+          : fissures.list
+            ? '<div class="empty">No fissure matches these filters.</div>'
+            : ''
+      }
+      <p class="small muted" style="margin:8px 0 0">From the public world state: DE's own feed when your browser is allowed to read it, otherwise WFCD's copy at api.warframestat.us. Times count from when the list was loaded, press Refresh for the current rotation.</p>
+    </div>`;
+}
+
+ACTIONS['fissures-refresh'] = () => loadFissures();
+
 VIEWS.missions = () => {
   if (!FARM) return NO_FARM;
   const f = missionFilter();
@@ -918,6 +1060,7 @@ VIEWS.missions = () => {
   });
   return `
     ${head('Missions', 'Where to go for what your wishlist is still missing.')}
+    ${fissurePanel(f)}
     <p class="note small">Planet drops have no published rates, so they count as how many resources you are short of drop there, raised by the drop bonus. Dark Sector and Steel Path bonuses add together and raise resource drops during the mission, not its reward table. Rewards and relic chances are the average per mission reward, so a long endless reward and a quick capture count the same.</p>
     <div class="toolbar">
       <input class="grow" type="search" placeholder="Search node or planet" value="${esc(f.q)}" data-input="miss-q" data-focus="miss-q" aria-label="Search missions">

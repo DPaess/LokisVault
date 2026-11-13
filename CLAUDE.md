@@ -153,6 +153,8 @@ Derived "need" for a part = sum over wishlist sets of `part.count`. "Missing" = 
 
 **Missions** (`#missions`): ranks `farm.json` missions by resources, wishlist relics or both. Three signals, each scaled against the best mission and added: planet drops (short resources on that planet times the drop bonus, regular star chart nodes only), mission rewards (share of the shortfall covered per reward), wishlist relics (chance per reward of a relic and then a missing part at Intact). Dark Sector and Steel Path bonuses stack additively. `farm.json` holds per reward averages (`e`, using A, A, B, C for endless missions) and the best rotation (`r`). Planet resources and Dark Sector bonuses are hand kept tables in `scripts/build-farm.mjs`, from the wiki.
 
+**Void Fissures** panel on top of Missions: read on first open and on Refresh, never on a timer. Tries DE's `https://api.warframe.com/cdn/worldState.php` first (decoded with `farm.json` `nodes` and `missionTypes`, from WFCD/warframe-worldstate-data), and falls back to `https://api.warframestat.us/pc/fissures` because DE's feed sends no CORS header today (checked 2026-11-13, the old `content.warframe.com/dynamic/worldState.php` is 404). Danilo asked to switch to DE's feed only once it works, which this does by itself. Each fissure shows owned relics of its tier (Omnia takes any), those with wanted parts, and short resources on its planet (not for Void Storms).
+
 Show a small `.toast` after saves and imports. Everything must work at phone width.
 
 ## GitHub Action (`.github/workflows/update-and-deploy.yml`)
@@ -175,4 +177,4 @@ Explain what it is and the GeForce Now motivation, the live link `https://dpaess
 4. Add the workflow and README, commit, push, ask Danilo to enable Pages with GitHub Actions as source, watch the first run with `gh run watch`.
 5. Ask Danilo to try the bulk mastery marking and the bulk paste, then iterate on his feedback.
 
-Ideas for later (do not build unless asked): Baro Ki'Teer current inventory from the worldstate, active fissures matched to owned relics, Varzia Prime Resurgence rotation, radiant vs intact share calculator for squads.
+Ideas for later (do not build unless asked): Baro Ki'Teer current inventory from the worldstate, Varzia Prime Resurgence rotation, radiant vs intact share calculator for squads.
