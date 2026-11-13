@@ -827,12 +827,20 @@ CHANGES['res-count'] = (el) => {
   render();
 };
 ACTIONS['res-farm'] = (el) => {
-  Object.assign(missionFilter(), { res: el.dataset.res, sort: 'resources', planet: '', dark: false });
+  Object.assign(missionFilter(), { res: el.dataset.res, sort: 'resources', planet: '', kind: '', q: '', dark: false });
 };
 
 // ---- Missions --------------------------------------------------------------------
 
-const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', dark: false, steel: false });
+const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', kind: '', q: '', dark: false, steel: false });
+// Tiers and phases ("Level 40 - 60 Cetus Bounty", "PROFIT-TAKER - PHASE 2", the Arena risk levels)
+// are one kind each in the type filter.
+const missionKind = (m) =>
+  /Bounty/.test(m.type) ? 'Bounty'
+  : /Vault/.test(m.type) ? 'Isolation Vault'
+  : /PROFIT-TAKER/i.test(m.type) ? 'Profit-Taker'
+  : /Risk\)|^Arena$/.test(m.type) ? 'Arena'
+  : m.type;
 // Planet resources and drop bonuses apply to enemies and containers on regular star chart nodes.
 const isStarNode = (m) => !/Bounty|Vault|Caches/.test(m.type);
 
@@ -841,6 +849,7 @@ const isStarNode = (m) => !/Bounty|Vault|Caches/.test(m.type);
 //   rewards: share of your shortfall that one mission reward covers on average
 //   wish:    chance per reward of a relic and then a part you are missing, at Intact
 function rankMissions(f) {
+  const q = norm(f.q);
   const resNeed = resourceNeeds();
   const partNeed = needs();
   const wanted = new Set(f.res ? [f.res] : FARM.resources.filter((r) => shortOf(resNeed, r) > 0));
@@ -878,6 +887,8 @@ function rankMissions(f) {
         r.score > 0 &&
         (!f.res || r.here.length || r.rewards.length) &&
         (!f.planet || r.m.planet === f.planet) &&
+        (!f.kind || missionKind(r.m) === f.kind) &&
+        (!q || norm(`${r.m.node} ${r.m.planet} ${r.m.type}`).includes(q)) &&
         (!f.dark || r.m.bonus > 0),
     )
     .sort((a, b) => b.score - a.score || b.m.bonus - a.m.bonus || a.m.node.localeCompare(b.m.node));
@@ -909,6 +920,8 @@ VIEWS.missions = () => {
     ${head('Missions', 'Where to go for what your wishlist is still missing.')}
     <p class="note small">Planet drops have no published rates, so they count as how many resources you are short of drop there, raised by the drop bonus. Dark Sector and Steel Path bonuses add together and raise resource drops during the mission, not its reward table. Rewards and relic chances are the average per mission reward, so a long endless reward and a quick capture count the same.</p>
     <div class="toolbar">
+      <input class="grow" type="search" placeholder="Search node or planet" value="${esc(f.q)}" data-input="miss-q" data-focus="miss-q" aria-label="Search missions">
+      <select data-change="miss-filter" data-key="kind" aria-label="Mission type"><option value="">Any mission type</option>${[...new Set(FARM.missions.map(missionKind))].sort().map((k) => opt(k, k, f.kind)).join('')}</select>
       <select data-change="miss-filter" data-key="sort" aria-label="Rank by">${opt('both', 'Rank by both', f.sort)}${opt('resources', 'Rank by resources', f.sort)}${opt('wishlist', 'Rank by wishlist relics', f.sort)}</select>
       <select data-change="miss-filter" data-key="res" aria-label="Resource"><option value="">Everything I am short of</option>${FARM.resources.map((r) => opt(r, r, f.res)).join('')}</select>
       <select data-change="miss-filter" data-key="planet" aria-label="Planet"><option value="">Any planet</option>${Object.keys(FARM.planets).map((p) => opt(p, p, f.planet)).join('')}</select>
@@ -925,6 +938,10 @@ VIEWS.missions = () => {
     }`;
 };
 
+INPUTS['miss-q'] = (el) => {
+  missionFilter().q = el.value;
+  render();
+};
 CHANGES['miss-filter'] = (el) => {
   missionFilter()[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value;
   render();
