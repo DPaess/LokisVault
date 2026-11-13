@@ -1256,7 +1256,8 @@ VIEWS.trade = () => {
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
 
   return `
-    ${head('Sell or ducat', 'Spare parts are the ones you own beyond what your wishlist needs. Prices are the lowest sell order from a player online or in game on warframe.market, refreshed daily.')}
+    ${head('Sell or ducat', 'Spare parts are the ones you own beyond what your wishlist needs. Prices are the lowest sell order from a player online or in game on warframe.market, at the time of the last refresh.')}
+    ${pricePanel()}
     <div class="panel" style="margin-bottom:14px">
       <label class="row">Trade for ducats when one plat is worth at least
         <input type="number" min="1" step="1" value="${state.settings.ducatRatio}" data-change="ratio" data-focus="ratio" aria-label="Ducats per plat"> ducats</label>
@@ -1881,7 +1882,7 @@ async function gh(path, { method = 'GET', body, token = sync?.token } = {}) {
   if (res.status === 401) throw Object.assign(new Error('GitHub rejected the token, it may have expired'), { status: 401 });
   if (res.status === 404) throw Object.assign(new Error('not found'), { status: 404 });
   if (!res.ok) throw Object.assign(new Error(`GitHub answered ${res.status}`), { status: res.status });
-  return res.json();
+  return res.status === 204 ? null : res.json();
 }
 
 async function gistVault(gist) {
@@ -2062,6 +2063,135 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // ---- Rendering and events --------------------------------------------------
+
+// ---- Market price refresh ---------------------------------------------------------
+// The browser cannot ask warframe.market itself (it allows no requests from other sites), so
+// Refresh prices starts this repo's GitHub Action, which fetches every price at the market's rate
+// limit (about 12 minutes) and redeploys the site. That takes a GitHub token allowed to run
+// Actions on the repo. It is kept only in this browser, never exported and never synced.
+
+const ACTIONS_KEY = 'lokisvault:actions';
+const REPO = 'DPaess/LokisVault';
+const WORKFLOW = 'update-and-deploy.yml';
+const ACTIONS_TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new';
+const priceRun = { token: readJson(ACTIONS_KEY)?.token ?? null, busy: false, run: null, error: '', setup: false, note: '' };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function reloadPrices() {
+  const before = PRICES_AT;
+  // GitHub Pages can serve the old file for a minute after the deploy, so try a few times.
+  for (let i = 0; i < 6; i++) {
+    const res = await fetch(`data/prices.json?t=${Date.now()}`, { cache: 'no-store' });
+    const data = res.ok ? await res.json() : null;
+    if (data?.prices && data.generatedAt !== before) {
+      PRICES = data.prices;
+      PRICES_AT = data.generatedAt;
+      fillSources();
+      return true;
+    }
+    await sleep(20000);
+  }
+  return false;
+}
+
+async function startPriceRefresh() {
+  if (priceRun.busy || !priceRun.token) return;
+  Object.assign(priceRun, { busy: true, error: '', note: '' });
+  render();
+  const token = priceRun.token;
+  const latest = async () =>
+    (await gh(`/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=1`, { token })).workflow_runs?.[0] ?? null;
+  try {
+    let run = await latest();
+    // A refresh already running is followed instead of starting a second one.
+    if (!run || run.status === 'completed') {
+      const asked = Date.now();
+      await gh(`/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`, { method: 'POST', body: { ref: 'main' }, token });
+      // The new run takes a few seconds to appear.
+      for (let i = 0; i < 20; i++) {
+        await sleep(3000);
+        run = await latest();
+        if (run && Date.parse(run.created_at) >= asked - 60000) break;
+      }
+    }
+    priceRun.run = run;
+    render();
+    while (priceRun.run && priceRun.run.status !== 'completed') {
+      await sleep(30000);
+      priceRun.run = await gh(`/repos/${REPO}/actions/runs/${priceRun.run.id}`, { token });
+      render();
+    }
+    if (priceRun.run?.conclusion !== 'success') throw new Error(`the GitHub run ended as ${priceRun.run?.conclusion ?? 'unknown'}`);
+    priceRun.note = (await reloadPrices())
+      ? 'Prices refreshed.'
+      : 'The run finished but the prices did not change. warframe.market may have failed, the run log says more.';
+    toast(priceRun.note);
+  } catch (err) {
+    priceRun.error = err.status === 401 || err.status === 403
+      ? 'GitHub rejected the token. It needs Actions read and write on LokisVault, and may have expired.'
+      : err.status === 404
+        ? 'GitHub did not find the workflow. The token must have access to the LokisVault repository.'
+        : err.message;
+  } finally {
+    priceRun.busy = false;
+    render();
+  }
+}
+
+function pricePanel() {
+  const day = PRICES_AT ? new Date(PRICES_AT).toLocaleString('en', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'never';
+  const run = priceRun.run;
+  const mins = run ? Math.max(0, Math.round((Date.now() - Date.parse(run.run_started_at ?? run.created_at)) / 60000)) : 0;
+  const status = priceRun.busy
+    ? run
+      ? `Running on GitHub (${esc(run.status.replace('_', ' '))}, ${mins} min so far, about 12 in all). <a href="${esc(run.html_url)}" target="_blank" rel="noopener">See the run ↗</a>`
+      : 'Starting the refresh on GitHub…'
+    : priceRun.error
+      ? `<span class="warn">${esc(priceRun.error)}</span>`
+      : esc(priceRun.note);
+  const setup = priceRun.setup || (!priceRun.token && priceRun.error);
+  return `
+    <div class="panel" style="margin-bottom:14px">
+      <div class="row" style="justify-content:space-between">
+        <span>Market prices from <b>${esc(day)}</b></span>
+        <span class="row">
+          ${priceRun.token ? `<button class="small primary" data-action="prices-refresh" ${priceRun.busy ? 'disabled' : ''}>Refresh prices</button>
+             <button class="small ghost" data-action="prices-token-forget" ${priceRun.busy ? 'disabled' : ''}>Forget token</button>`
+          : '<button class="small" data-action="prices-token-setup">Set up Refresh prices</button>'}
+        </span>
+      </div>
+      ${status ? `<p class="small" style="margin:8px 0 0">${status}</p>` : ''}
+      ${
+        setup && !priceRun.token
+          ? `<form data-form="prices-token" style="margin-top:10px">
+               <p class="small muted" style="margin:0 0 8px">Refreshing runs this site's GitHub Action, so it only works for the repository owner.
+                 <a href="${ACTIONS_TOKEN_URL}" target="_blank" rel="noopener">Create a fine grained token ↗</a> with access to <b>only the LokisVault repository</b> and the permission <b>Actions: Read and write</b>, then paste it here. It stays in this browser.</p>
+               <div class="row"><input class="grow" name="token" type="password" autocomplete="off" placeholder="github_pat_…" aria-label="GitHub token" required>
+                 <button class="primary small">Save and refresh</button></div>
+             </form>`
+          : ''
+      }
+    </div>`;
+}
+
+ACTIONS['prices-refresh'] = () => startPriceRefresh();
+ACTIONS['prices-token-setup'] = () => {
+  priceRun.setup = true;
+  render();
+};
+ACTIONS['prices-token-forget'] = () => {
+  if (!confirm('Forget the GitHub token for Refresh prices on this browser?')) return;
+  writeJson(ACTIONS_KEY, null);
+  Object.assign(priceRun, { token: null, setup: false, error: '', note: '' });
+  render();
+};
+FORMS['prices-token'] = (form, fd) => {
+  const token = String(fd.get('token') ?? '').trim();
+  if (!token) return;
+  writeJson(ACTIONS_KEY, { token });
+  Object.assign(priceRun, { token, setup: false });
+  startPriceRefresh();
+};
 
 const currentTab = () => {
   const t = location.hash.slice(1);

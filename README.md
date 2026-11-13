@@ -16,7 +16,7 @@ I play Warframe through GeForce Now. The game runs in the cloud, so tools like A
 * **Resources**: the resources you own against what your wishlist costs, part recipes included, and how much you are short of each.
 * **Missions**: star chart nodes ranked by the resources you are short of, the relics that drop missing wishlist parts, or both. Dark Sector and Steel Path drop bonuses are counted. On top, the Void Fissures open right now, with a Refresh button, matched to the relics you own and the resources you are short of.
 * **Mastery**: every masterable item with mastered or not, remaining mastery points, filters and bulk marking for a quick first fill.
-* **Sell or ducat**: every spare part with its market price, ducat value and a verdict based on a ducats per plat threshold you choose, plus spare sets worth more sold whole.
+* **Sell or ducat**: every spare part with its market price, ducat value and a verdict based on a ducats per plat threshold you choose, plus spare sets worth more sold whole. Prices are fetched when the repository owner presses **Refresh prices**, which runs the GitHub Action (about 12 minutes) with a GitHub token kept only in that browser, since warframe.market does not accept requests straight from a browser.
 * **Data**: add relics, prime parts and mastered items from screenshots (see below), JSON backup and restore, optional sync between devices through a secret Gist on your own GitHub account, and bulk paste for relics, parts and mastered items (`3x Lith G1`, `Neo H4 Relic (Radiant) x2`, `Loki Prime Chassis`...).
 
 ## Adding items from screenshots

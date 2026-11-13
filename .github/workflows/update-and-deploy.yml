@@ -39,10 +39,10 @@ jobs:
         run: npm run build:farm
         continue-on-error: true
 
-      # Prices refresh on the daily schedule and manual runs only. warframe.market can be
-      # slow or down, so keep the committed prices if this fails.
+      # Prices refresh only on manual runs, started from the site's Refresh prices button or from
+      # the Actions tab. warframe.market can be slow or down, so keep the committed prices if this fails.
       - name: Fetch market prices
-        if: github.event_name != 'push'
+        if: github.event_name == 'workflow_dispatch'
         run: npm run fetch:prices
         continue-on-error: true
         timeout-minutes: 30
