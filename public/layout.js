@@ -181,6 +181,8 @@ export function tileRegions(t) {
   return {
     name: r(t.x0 - 0.04 * s, t.y0 + 0.6 * s, t.x1 + 0.04 * s, t.y1 + 0.1 * s),
     count: r(t.x0 + 0.01 * s, t.y0 + 0.01 * s, t.x0 + 0.45 * s, t.y0 + 0.24 * s),
+    // Resource stacks ("✓ 714,853") run past the corner, so they are also read across most of the top.
+    countWide: r(t.x0 + 0.01 * s, t.y0 + 0.01 * s, t.x0 + 0.9 * s, t.y0 + 0.24 * s),
     icon: r(t.x0 + 0.2 * s, t.y0 + 0.15 * s, t.x1 - 0.2 * s, t.y0 + 0.6 * s),
   };
 }

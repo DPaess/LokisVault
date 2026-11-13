@@ -1350,7 +1350,15 @@ function readTile(tile) {
       return !r;
     });
   const relic = readRelicCode(words);
-  const hit = relic ? { kind: 'relic', name: relic } : words.length ? matchReadText(words.join(' ')) : null;
+  let hit = relic ? { kind: 'relic', name: relic } : words.length ? matchReadText(words.join(' ')) : null;
+  // Icon art above the name can come back as a stray word ("E Ferrite"). Dropping leading words is
+  // only trusted when what is left is exactly a known name.
+  for (let i = 1; !hit && i < words.length; i++) {
+    const rest = words.slice(i).join(' ');
+    const resource = FARM?.resources.find((r) => norm(r) === rest);
+    const part = partIndex().get(rest);
+    hit = resource ? { kind: 'resource', name: resource } : part ? { kind: 'part', name: part } : null;
+  }
   if (!hit) return null;
   // The quantity comes from the count drawn on the tile, never from numbers inside the name text.
   const item = { kind: hit.kind, name: hit.name, ref: hit.kind === 'relic' ? ref : null };

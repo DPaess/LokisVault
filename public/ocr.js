@@ -420,13 +420,22 @@ export async function readScreens(blobs, onProgress = () => {}) {
         if (line.text.trim()) lines.push(line);
       }
       if (!lines.length) continue;
-      const c = reg.count;
-      const countRead = await readLine(reader, rgba, w, { x0: Math.max(0, c.x0), y0: Math.max(0, c.y0), x1: Math.min(w, c.x1), y1: Math.min(h, c.y1) });
-      const m = countRead.conf > 0.6 ? countRead.text.match(new RegExp(`(${COUNT})`)) : null;
+      const readCount = async (c) => {
+        const read = await readLine(reader, rgba, w, { x0: Math.max(0, c.x0), y0: Math.max(0, c.y0), x1: Math.min(w, c.x1), y1: Math.min(h, c.y1) });
+        const m = read.conf > 0.6 ? read.text.match(new RegExp(`(${COUNT})`)) : null;
+        return m && parseCount(m[1]) > 0 ? parseCount(m[1]) : null;
+      };
+      // The corner read decides. The wider read only counts when it continues the same number, so
+      // icon art it picks up on relic and part tiles cannot change their counts.
+      let count = await readCount(reg.count);
+      if (count != null) {
+        const wide = await readCount(reg.countWide);
+        if (wide != null && wide > count && String(wide).startsWith(String(count))) count = wide;
+      }
       tiles.push({
         text: lines.map((l) => l.text).join(' '),
         conf: Math.min(...lines.map((l) => l.conf)),
-        count: m && parseCount(m[1]) > 0 ? parseCount(m[1]) : null,
+        count,
         light: lightIn(v, w, reg.icon),
         box: t,
       });

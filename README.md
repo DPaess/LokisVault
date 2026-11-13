@@ -23,7 +23,7 @@ I play Warframe through GeForce Now. The game runs in the cloud, so tools like A
 
 Typing hundreds of items is slow, so the Data tab can read them from screenshots you take in game. With GeForce Now, the overlay screenshot or your system's screenshot key both work. Choose, drop or paste one or many screenshots, check the list it finds, then click **Add checked to vault**. Text recognition runs in your browser with Tesseract.js and your images are never uploaded.
 
-Three screens work today:
+Four screens work today:
 
 **Inventory → Prime Parts.** Names and the ✓ count in each tile's corner are read. A tile without a number counts as one.
 
@@ -32,6 +32,8 @@ Three screens work today:
 **Void Relics.** The relic name, the `x22` style count and the refinement (`[Radiant]`) are read. The "Possible Rewards" panel on the right is ignored, those are not items you own, and so are greyed out relics (the ones with an eye icon instead of a count), which the screen lists although you do not have them. Take screenshots per era tab.
 
 ![Void Relics screen](docs/screenshots/void-relics.jpg)
+
+**Inventory → Resources.** The resources your prime sets use are read with their full stack count (`714,853`), and the screenshot's number replaces what you had, since the screen shows the whole stack. Other resources on the screen are skipped.
 
 **Profile → Equipment.** Every tile showing **MAX RANK** is marked as mastered. Tiles still levelling (`RANK 28`) and greyed out items are skipped, and nothing is ever unmarked.
 
