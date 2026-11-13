@@ -832,7 +832,7 @@ ACTIONS['res-farm'] = (el) => {
 
 // ---- Missions --------------------------------------------------------------------
 
-const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', kind: '', q: '', dark: false, steel: false, fiss: '' });
+const missionFilter = () => (ui.missions ??= { sort: 'both', res: '', planet: '', kind: '', q: '', dark: false, fiss: '' });
 // Tiers and phases ("Level 40 - 60 Cetus Bounty", "PROFIT-TAKER - PHASE 2", the Arena risk levels)
 // are one kind each in the type filter.
 const missionKind = (m) =>
@@ -878,8 +878,9 @@ function rankMissions(f) {
   ];
   const scored = entries.map(({ m, fissure }) => {
     const ground = isStarNode(m) && !m.storm;
-    // A Steel Path fissure is always Steel Path; the checkbox is for the normal missions.
-    const steel = fissure ? fissure.hard : f.steel;
+    // Missions are counted on Steel Path, which every star chart node has. A normal fissure is the
+    // exception: it can only be played in normal mode.
+    const steel = fissure ? fissure.hard : true;
     const bonus = ground ? m.bonus + (steel ? 100 : 0) : 0;
     const here = ground ? (FARM.planets[m.planet] ?? []).filter((r) => wanted.has(r)) : [];
     const rewards = m.rewards.filter((x) => wanted.has(x.i)).sort((a, b) => b.e - a.e);
@@ -1054,14 +1055,13 @@ VIEWS.missions = () => {
   });
   return `
     ${head('Missions', 'Where to go for what your wishlist is still missing.')}
-    <p class="note small">Planet drops have no published rates, so they count as how many resources you are short of drop there, raised by the drop bonus. Dark Sector and Steel Path bonuses add together and raise resource drops during the mission, not its reward table. Rewards and relic chances are the average per mission reward, so a long endless reward and a quick capture count the same. Open Void Fissures are listed next to the normal missions: same drops and rewards, plus the relic you crack, counted as your best relic of that tier for a missing part.</p>
+    <p class="note small">Planet drops have no published rates, so they count as how many resources you are short of drop there, raised by the drop bonus. Missions are counted on Steel Path (+100% resource drops), which every star chart node has, except normal fissures, which are played in normal mode. Dark Sector and Steel Path bonuses add together and raise resource drops during the mission, not its reward table. Rewards and relic chances are the average per mission reward, so a long endless reward and a quick capture count the same. Open Void Fissures are listed next to the normal missions: same drops and rewards, plus the relic you crack, counted as your best relic of that tier for a missing part.</p>
     <div class="toolbar">
       <input class="grow" type="search" placeholder="Search node or planet" value="${esc(f.q)}" data-input="miss-q" data-focus="miss-q" aria-label="Search missions">
       <select data-change="miss-filter" data-key="kind" aria-label="Mission type"><option value="">Any mission type</option>${[...new Set(FARM.missions.map(missionKind))].sort().map((k) => opt(k, k, f.kind)).join('')}</select>
       <select data-change="miss-filter" data-key="sort" aria-label="Rank by">${opt('both', 'Rank by both', f.sort)}${opt('resources', 'Rank by resources', f.sort)}${opt('wishlist', 'Rank by wishlist relics', f.sort)}</select>
       <select data-change="miss-filter" data-key="res" aria-label="Resource"><option value="">Everything I am short of</option>${FARM.resources.map((r) => opt(r, r, f.res)).join('')}</select>
       <select data-change="miss-filter" data-key="planet" aria-label="Planet"><option value="">Any planet</option>${Object.keys(FARM.planets).map((p) => opt(p, p, f.planet)).join('')}</select>
-      ${check('steel', 'Steel Path (+100%)')}
       ${check('dark', 'Dark Sectors only')}
     </div>
     <div class="toolbar">
