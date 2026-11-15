@@ -62,6 +62,20 @@ function toast(msg, undoable = false) {
   setTimeout(() => el.remove(), undoable ? 7000 : 2400);
 }
 
+// Browsers can block a page's dialogs (after "Prevent this page from creating additional dialogs",
+// or in some in-app browsers). confirm() then answers Cancel at once without showing anything, so
+// the button seems dead. An answer faster than anyone can click means the dialog was blocked:
+// say so, and return null so callers can tell it apart from a real Cancel.
+function ask(message) {
+  const start = performance.now();
+  const ok = confirm(message);
+  if (!ok && performance.now() - start < 40) {
+    toast('Your browser blocked the confirmation dialog. Close this tab and open the site again to allow it.');
+    return null;
+  }
+  return ok;
+}
+
 // ---- State -----------------------------------------------------------------
 
 const emptyState = () => ({ v: 1, savedAt: 0, relics: {}, parts: {}, resources: {}, wishlist: [], mastered: {}, settings: { ducatRatio: 10 } });
@@ -385,7 +399,7 @@ ACTIONS['relics-remove-shown'] = () => {
   const names = relicsShown();
   const f = ui.relics;
   const what = f.q || f.era || f.filter !== 'all' ? `the ${names.length} relics matching your filters` : `all ${names.length} relics`;
-  if (!names.length || !confirm(`Remove ${what} from your vault? You can undo this.`)) return;
+  if (!names.length || !ask(`Remove ${what} from your vault? You can undo this.`)) return;
   checkpoint();
   for (const r of names) delete state.relics[r];
   save(`Removed ${names.length} relics`, true);
@@ -560,7 +574,7 @@ CHANGES['parts-type'] = (el) => {
 ACTIONS['parts-remove-shown'] = () => {
   const names = partsShown();
   const what = ui.parts.q || ui.parts.type ? `the ${names.length} part kinds matching your filters` : `all ${names.length} part kinds`;
-  if (!names.length || !confirm(`Remove ${what} from your vault? You can undo this.`)) return;
+  if (!names.length || !ask(`Remove ${what} from your vault? You can undo this.`)) return;
   checkpoint();
   for (const p of names) delete state.parts[p];
   save(`Removed ${names.length} part kinds`, true);
@@ -752,7 +766,7 @@ ACTIONS['wish-remove'] = (el) => {
 };
 ACTIONS['wish-remove-shown'] = (el) => {
   const sets = JSON.parse(el.dataset.sets);
-  if (!confirm(`Remove ${sets.length} set${sets.length === 1 ? '' : 's'} from your wishlist? You can undo this.`)) return;
+  if (!ask(`Remove ${sets.length} set${sets.length === 1 ? '' : 's'} from your wishlist? You can undo this.`)) return;
   checkpoint();
   state.wishlist = state.wishlist.filter((s) => !sets.includes(s));
   save(`Removed ${sets.length} sets from your wishlist`, true);
@@ -761,14 +775,13 @@ ACTIONS['wish-remove-shown'] = (el) => {
 ACTIONS['wish-built'] = (el) => {
   const set = el.dataset.set;
   const s = DATA.sets[set];
-  if (!confirm(`Mark ${set} as built? The parts and resources it uses are removed from your inventory.`)) return;
   checkpoint();
   for (const p of s.parts) state.parts[p.name] = Math.max(0, owned(p.name) - p.count);
   for (const [r, n] of Object.entries(FARM?.recipes[set] ?? {})) state.resources[r] = Math.max(0, ownedRes(r) - n);
   state.wishlist = state.wishlist.filter((x) => x !== set);
   // Built weapons that other sets use (Bronco Prime for Akbronco Prime) are kept as a part you own.
   if (DATA.parts[set]?.built) state.parts[set] = owned(set) + 1;
-  save(`${set} built`, true);
+  save(`${set} built, its parts and resources used up`, true);
   render();
 };
 
@@ -1200,7 +1213,7 @@ CHANGES['mastery-toggle'] = (el) => {
 ACTIONS['mastery-bulk'] = (el) => {
   const shown = masteryShown();
   const on = el.dataset.value === '1';
-  if (!confirm(`${on ? 'Mark' : 'Unmark'} all ${shown.length} items matching your filters as ${on ? '' : 'not '}mastered? This includes the ones not on screen yet.`)) return;
+  if (!ask(`${on ? 'Mark' : 'Unmark'} all ${shown.length} items matching your filters as ${on ? '' : 'not '}mastered? This includes the ones not on screen yet.`)) return;
   checkpoint();
   for (const m of shown) {
     if (on) state.mastered[m.id] = true;
@@ -1830,7 +1843,7 @@ CHANGES.import = async (el) => {
   try {
     const raw = JSON.parse(await file.text());
     if (!raw || typeof raw !== 'object' || raw.v !== 1) throw new Error('not a Loki’s Vault backup');
-    if (!confirm('Replace everything in this browser with this backup?')) return;
+    if (!ask('Replace everything in this browser with this backup?')) return;
     checkpoint();
     state = sanitize(raw);
     save('Backup imported', true);
@@ -1841,7 +1854,7 @@ CHANGES.import = async (el) => {
 };
 ACTIONS.reset = () => {
   const where = sync?.token ? 'in this browser and, through sync, on your other devices' : 'in this browser';
-  if (!confirm(`Delete every relic, part, wishlist set and mastery mark stored ${where}? Export a backup first if unsure.`)) return;
+  if (!ask(`Delete every relic, part, wishlist set and mastery mark stored ${where}? Export a backup first if unsure.`)) return;
   checkpoint();
   state = emptyState();
   save('Vault reset', true);
@@ -2033,10 +2046,10 @@ FORMS['sync-connect'] = async (form, fd) => {
     sync = { token, gistId, at: null };
     if (gistId) {
       const remote = await gistVault(await gh(`/gists/${gistId}`));
-      const useRemote =
-        remote &&
-        (isEmptyVault(state) ||
-          confirm(`Your Gist already has a vault, saved ${new Date(Number(remote.savedAt) || 0).toLocaleString('en')}.\n\nOK: load it into this browser (the data here is kept as a restorable copy).\nCancel: keep this browser's data and upload it to the Gist.`));
+      // null when the browser blocked the dialog: then nothing is uploaded or replaced.
+      const choice = remote && !isEmptyVault(state) ? ask(`Your Gist already has a vault, saved ${new Date(Number(remote.savedAt) || 0).toLocaleString('en')}.\n\nOK: load it into this browser (the data here is kept as a restorable copy).\nCancel: keep this browser's data and upload it to the Gist.`) : true;
+      if (choice === null) throw new Error('your browser blocked the dialog asking which vault to keep, nothing was changed. Close this tab and open the site again to allow it');
+      const useRemote = Boolean(remote) && choice;
       if (useRemote) adoptRemote(remote);
       else {
         state.savedAt = Date.now();
@@ -2056,7 +2069,7 @@ FORMS['sync-connect'] = async (form, fd) => {
 };
 ACTIONS['sync-now'] = () => syncNow({ quiet: false });
 ACTIONS['sync-off'] = () => {
-  if (!confirm('Disconnect this browser? Your data stays here and in the Gist, only the token is removed from this browser.')) return;
+  if (!ask('Disconnect this browser? Your data stays here and in the Gist, only the token is removed from this browser.')) return;
   sync = null;
   writeJson(SYNC_KEY, null);
   toast('Disconnected');
@@ -2064,7 +2077,7 @@ ACTIONS['sync-off'] = () => {
 };
 ACTIONS['sync-restore'] = () => {
   const prev = readJson(BEFORE_SYNC_KEY);
-  if (!prev || !confirm('Replace the current data with the copy this browser had before the last download from your Gist?')) return;
+  if (!prev || !ask('Replace the current data with the copy this browser had before the last download from your Gist?')) return;
   state = sanitize(prev);
   writeJson(BEFORE_SYNC_KEY, null);
   save('Previous copy restored');
@@ -2193,7 +2206,7 @@ ACTIONS['prices-token-setup'] = () => {
   render();
 };
 ACTIONS['prices-token-forget'] = () => {
-  if (!confirm('Forget the GitHub token for Refresh prices on this browser?')) return;
+  if (!ask('Forget the GitHub token for Refresh prices on this browser?')) return;
   writeJson(ACTIONS_KEY, null);
   Object.assign(priceRun, { token: null, setup: false, error: '', note: '' });
   render();
