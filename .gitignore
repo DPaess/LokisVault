@@ -1,2 +1,4 @@
 node_modules/
 .DS_Store
+# Fetched at deploy time by .github/workflows/fissures.yml, never committed.
+public/data/fissures.json
