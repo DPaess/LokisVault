@@ -984,13 +984,23 @@ async function loadFissures() {
   fissures.busy = true;
   if (currentTab() === 'missions') render();
   try {
+    let list;
     try {
-      fissures.list = fromDE(await getJson(DE_WORLDSTATE));
+      list = fromDE(await getJson(DE_WORLDSTATE));
       fissures.source = 'DE';
     } catch {
-      fissures.list = fromWFCD(await getJson(WFCD_FISSURES));
+      list = fromWFCD(await getJson(WFCD_FISSURES));
       fissures.source = 'WFCD';
     }
+    // WFCD's API sometimes keeps serving an old list. When nothing in it is still open, say so
+    // instead of showing an empty rotation.
+    if (!list.some((x) => x.expiry > Date.now())) {
+      const last = Math.max(0, ...list.map((x) => x.expiry));
+      throw new Error(
+        `${fissures.source === 'DE' ? "DE's" : "WFCD's"} fissure feed is out of date${last ? `, its newest fissure ended at ${new Date(last).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}` : ''}. Try Refresh later`,
+      );
+    }
+    fissures.list = list;
     fissures.at = Date.now();
     fissures.error = '';
   } catch (err) {
@@ -1015,7 +1025,7 @@ function relicsForTier(tier, need) {
 
 function fissureStatus() {
   if (fissures.busy) return 'Loading fissures…';
-  if (fissures.error) return `<span class="warn">Could not load fissures (${esc(fissures.error)}).</span>`;
+  if (fissures.error) return `<span class="warn">${esc(fissures.error)}.</span>`;
   if (!fissures.at) return '';
   const open = (fissures.list ?? []).filter((x) => x.expiry > Date.now()).length;
   return `${open} fissures, updated ${new Date(fissures.at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })} from ${fissures.source === 'DE' ? "DE's world state" : 'WFCD'}`;
