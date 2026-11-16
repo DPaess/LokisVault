@@ -70,11 +70,6 @@ jobs:
         with:
           ref: ${{ needs.data.outputs.sha }}
 
-      # Every deploy replaces the whole site, so the fissure list (never committed) is fetched again.
-      - name: Fetch fissures
-        run: node scripts/fetch-fissures.mjs
-        continue-on-error: true
-
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3

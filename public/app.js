@@ -955,7 +955,7 @@ function rankMissions(f) {
 
 const DE_WORLDSTATE = 'https://api.warframe.com/cdn/worldState.php';
 const WFCD_FISSURES = 'https://api.warframestat.us/pc/fissures?language=en';
-const fissures = { list: null, at: null, busy: false, error: '', source: '', copyAt: null, run: null };
+const fissures = { list: null, at: null, busy: false, error: '', source: '' };
 const FISSURE_TIERS = ['Lith', 'Meso', 'Neo', 'Axi', 'Requiem', 'Omnia'];
 
 const deDate = (d) => Number(d?.$date?.$numberLong ?? d?.$date ?? 0) || 0;
@@ -992,85 +992,34 @@ async function getJson(url) {
   return res.json();
 }
 
-// Sources in order: DE's feed straight from the browser (blocked today), the site's own copy of it
-// (data/fissures.json, written every hour by .github/workflows/fissures.yml), then WFCD's API, which
-// sometimes keeps serving an old list. The first one with fissures still open wins.
-const SITE_FISSURES = 'data/fissures.json';
-const FISSURES_WORKFLOW = 'fissures.yml';
-const FISSURE_SOURCES = [
-  ['DE', async () => fromDE(await getJson(DE_WORLDSTATE))],
-  [
-    'site',
-    async () => {
-      const d = await getJson(`${SITE_FISSURES}?t=${Date.now()}`);
-      if (!Array.isArray(d?.fissures)) throw new Error('unexpected answer');
-      fissures.copyAt = Date.parse(d.generatedAt) || null;
-      return d.fissures;
-    },
-  ],
-  ['WFCD', async () => fromWFCD(await getJson(WFCD_FISSURES))],
-];
-
-async function fetchFissures() {
-  let stale = false;
-  for (const [source, load] of FISSURE_SOURCES) {
-    try {
-      const list = await load();
-      if (list.some((x) => x.expiry > Date.now())) return { list, source };
-      stale = true;
-    } catch {}
-  }
-  throw new Error(stale ? 'Every fissure feed is out of date right now, try Refresh fissures later' : 'Could not load fissures');
-}
-
-// With the GitHub token saved for Refresh prices, Refresh fissures also asks GitHub for a new copy
-// of DE's world state when the site's copy is older than 15 minutes, and loads it (about 2 minutes).
-async function updateSiteCopy() {
-  const token = priceRun.token;
-  const latest = async () =>
-    (await gh(`/repos/${REPO}/actions/workflows/${FISSURES_WORKFLOW}/runs?event=workflow_dispatch&per_page=1`, { token })).workflow_runs?.[0] ?? null;
-  let run = await latest();
-  if (!run || run.status === 'completed') {
-    const asked = Date.now();
-    await gh(`/repos/${REPO}/actions/workflows/${FISSURES_WORKFLOW}/dispatches`, { method: 'POST', body: { ref: 'main' }, token });
-    for (let i = 0; i < 20; i++) {
-      await sleep(3000);
-      run = await latest();
-      if (run && Date.parse(run.created_at) >= asked - 60000) break;
-    }
-  }
-  fissures.run = run;
-  render();
-  while (fissures.run && fissures.run.status !== 'completed') {
-    await sleep(15000);
-    fissures.run = await gh(`/repos/${REPO}/actions/runs/${fissures.run.id}`, { token });
-    render();
-  }
-  if (fissures.run?.conclusion !== 'success') throw new Error(`The GitHub run ended as ${fissures.run?.conclusion ?? 'unknown'}`);
-  const before = fissures.copyAt;
-  // GitHub Pages can serve the old file for a minute after the deploy.
-  for (let i = 0; i < 6; i++) {
-    const { list, source } = await fetchFissures();
-    if (source === 'site' && fissures.copyAt !== before) return { list, source };
-    await sleep(15000);
-  }
-  return fetchFissures();
-}
-
-async function loadFissures({ update = false } = {}) {
+async function loadFissures() {
   if (fissures.busy) return;
-  Object.assign(fissures, { busy: true, run: null });
+  fissures.busy = true;
   if (currentTab() === 'missions') render();
   try {
-    let found = await fetchFissures().catch((err) => ({ error: err }));
-    const old = found.source !== 'DE' && (!fissures.copyAt || Date.now() - fissures.copyAt > 15 * 60000);
-    if (update && priceRun.token && old) found = await updateSiteCopy();
-    if (found.error) throw found.error;
-    Object.assign(fissures, { list: found.list, source: found.source, at: Date.now(), error: '' });
+    let list;
+    try {
+      list = fromDE(await getJson(DE_WORLDSTATE));
+      fissures.source = 'DE';
+    } catch {
+      list = fromWFCD(await getJson(WFCD_FISSURES));
+      fissures.source = 'WFCD';
+    }
+    // WFCD's API sometimes keeps serving an old list. When nothing in it is still open, say so
+    // instead of showing an empty rotation.
+    if (!list.some((x) => x.expiry > Date.now())) {
+      const last = Math.max(0, ...list.map((x) => x.expiry));
+      throw new Error(
+        `${fissures.source === 'DE' ? "DE's" : "WFCD's"} fissure feed is out of date${last ? `, its newest fissure ended at ${new Date(last).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}` : ''}. Try Refresh later`,
+      );
+    }
+    fissures.list = list;
+    fissures.at = Date.now();
+    fissures.error = '';
   } catch (err) {
-    fissures.error = err.status === 401 || err.status === 403 ? 'GitHub rejected the token saved for Refresh prices' : err.message;
+    fissures.error = err.message;
   } finally {
-    Object.assign(fissures, { busy: false, run: null });
+    fissures.busy = false;
     if (currentTab() === 'missions') render();
   }
 }
@@ -1088,22 +1037,14 @@ function relicsForTier(tier, need) {
 }
 
 function fissureStatus() {
-  const time = (t) => new Date(t).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' });
-  if (fissures.busy) {
-    const run = fissures.run;
-    return run
-      ? `Getting a new copy of DE's world state on GitHub (${esc(run.status.replace('_', ' '))}, about 2 minutes). <a href="${esc(run.html_url)}" target="_blank" rel="noopener">See the run ↗</a>`
-      : 'Loading fissures…';
-  }
+  if (fissures.busy) return 'Loading fissures…';
   if (fissures.error) return `<span class="warn">${esc(fissures.error)}.</span>`;
   if (!fissures.at) return '';
   const open = (fissures.list ?? []).filter((x) => x.expiry > Date.now()).length;
-  const from =
-    fissures.source === 'DE' ? "DE's world state" : fissures.source === 'site' ? `the site's copy of DE's world state from ${time(fissures.copyAt)}` : 'WFCD';
-  return `${open} fissures from ${from}, loaded ${time(fissures.at)}`;
+  return `${open} fissures, updated ${new Date(fissures.at).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })} from ${fissures.source === 'DE' ? "DE's world state" : 'WFCD'}`;
 }
 
-ACTIONS['fissures-refresh'] = () => loadFissures({ update: true });
+ACTIONS['fissures-refresh'] = () => loadFissures();
 
 VIEWS.missions = () => {
   if (!FARM) return NO_FARM;

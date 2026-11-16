@@ -60,7 +60,7 @@ Yes. The site never touches the game: no memory reading, no screen capture, no a
 * [WFCD/warframe-items](https://github.com/WFCD/warframe-items) (`@wfcd/items`): masterable items, prime sets, components and ducats.
 * [DE's Public Export](https://content.warframe.com/PublicExport/index_en.txt.lzma): the recipes behind what each prime set costs.
 * [The Warframe Wiki](https://wiki.warframe.com/): resources per planet and Dark Sector bonuses, kept by hand in `scripts/build-farm.mjs`.
-* The public world state for live Void Fissures: DE's own feed, read every hour by a GitHub Action since browsers may not read it, named with [WFCD/warframe-worldstate-data](https://github.com/WFCD/warframe-worldstate-data), and [WFCD's API](https://api.warframestat.us/) as a fallback.
+* The public world state for live Void Fissures: DE's own feed when browsers are allowed to read it, otherwise [WFCD's API](https://api.warframestat.us/) with node names from [WFCD/warframe-worldstate-data](https://github.com/WFCD/warframe-worldstate-data).
 * [WFCD/warframe-drop-data](https://github.com/WFCD/warframe-drop-data): relic reward tables and current mission drops, from DE's official drop tables.
 * [Tesseract.js](https://github.com/naptha/tesseract.js): in browser text recognition for the screenshot import.
 * [warframe.market](https://warframe.market) API: live sell and buy orders. A price is the lowest sell order from a player who is online or in game, refreshed once a day.
