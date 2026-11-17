@@ -2125,12 +2125,16 @@ async function startPriceRefresh() {
   Object.assign(priceRun, { busy: true, error: '', note: '' });
   render();
   const token = priceRun.token;
-  const latest = async () =>
-    (await gh(`/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?event=workflow_dispatch&per_page=1`, { token })).workflow_runs?.[0] ?? null;
+  // Runs that fetch prices: the daily schedule and manual ones (a push does not).
+  const priceRuns = async () =>
+    ((await gh(`/repos/${REPO}/actions/workflows/${WORKFLOW}/runs?per_page=10`, { token })).workflow_runs ?? []).filter((r) =>
+      ['schedule', 'workflow_dispatch'].includes(r.event),
+    );
+  const latest = async () => (await priceRuns()).find((r) => r.event === 'workflow_dispatch') ?? null;
   try {
-    let run = await latest();
-    // A refresh already running is followed instead of starting a second one.
-    if (!run || run.status === 'completed') {
+    // A refresh already running, scheduled or started by hand, is followed instead of starting a second one.
+    let run = (await priceRuns()).find((r) => r.status !== 'completed') ?? null;
+    if (!run) {
       const asked = Date.now();
       await gh(`/repos/${REPO}/actions/workflows/${WORKFLOW}/dispatches`, { method: 'POST', body: { ref: 'main' }, token });
       // The new run takes a few seconds to appear.
