@@ -162,7 +162,7 @@ Show a small `.toast` after saves and imports. Everything must work at phone wid
 * Triggers: push to `main`, `schedule` once a day (e.g. `17 9 * * *` UTC), and `workflow_dispatch`.
 * Permissions: `contents: write`, `pages: write`, `id-token: write`.
 * Job 1 `data`: checkout, setup Node 22, `npm ci`, `npm run build:data`, `npm run build:farm` with `continue-on-error: true`, `npm run fetch:prices` with `continue-on-error: true` (keep the committed prices if it fails) on `schedule` and `workflow_dispatch`, not on push (dropped on 2026-11-13, the daily schedule was brought back on 2026-11-16 next to the button), commit `public/data/*.json` if changed with message `chore(data): daily refresh` as `github-actions[bot]`, using `[skip ci]` to avoid loops, push.
-* Job 2 `deploy` (needs data): checkout the updated ref, `actions/configure-pages`, `actions/upload-pages-artifact` with `path: public`, `actions/deploy-pages`.
+* Job 1 then runs `actions/configure-pages` and `actions/upload-pages-artifact` with `path: public`. Job 2 `deploy` (needs data) only runs `actions/deploy-pages`. Keep upload and deploy in separate jobs: in one job deploy-pages kept failing with "No artifacts named github-pages" (Nov 22 to 24, 2026).
 * Danilo must set **Settings → Pages → Source: GitHub Actions** once. Tell him.
 
 ## README.md (English)

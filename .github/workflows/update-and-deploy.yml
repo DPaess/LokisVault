@@ -19,8 +19,6 @@ concurrency:
 jobs:
   data:
     runs-on: ubuntu-latest
-    outputs:
-      sha: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +47,6 @@ jobs:
         timeout-minutes: 30
 
       - name: Commit refreshed data
-        id: commit
         run: |
           if [ -n "$(git status --porcelain public/data)" ]; then
             git config user.name 'github-actions[bot]'
@@ -58,7 +55,14 @@ jobs:
             git commit -m 'chore(data): daily refresh [skip ci]'
             git push
           fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The upload happens here and the deploy in the next job. With both in one job, deploy-pages
+      # often failed to find the artifact uploaded a second earlier (Nov 2026, actions/deploy-pages#451).
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: public
 
   deploy:
     needs: data
@@ -67,15 +71,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.data.outputs.sha }}
-
-      - uses: actions/configure-pages@v6
-
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: public
-
       - id: deployment
         uses: actions/deploy-pages@v5
